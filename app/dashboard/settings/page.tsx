@@ -2,15 +2,23 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/utils/supabase/client';
-import { Plus, Trash2, Edit2, Loader2, Save, X, Building, LogOut, Activity, Search, MessageSquare, ChevronRight } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { Plus, Trash2, Edit2, Loader2, Save, X, Building, LogOut, Activity, Search, MessageSquare, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 interface Client {
   id: string;
   nome: string;
   meta_ads_account_id?: string;
+  meta_connected?: boolean;
   google_ads_account_id?: string;
+  google_connected?: boolean;
   crm_account_id?: string;
+  crm_connected?: boolean;
+}
+
+interface AdAccount {
+  account_id: string;
+  name: string;
 }
 
 export default function SettingsPage() {
@@ -30,14 +38,25 @@ export default function SettingsPage() {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [metaId, setMetaId] = useState('');
   const [googleId, setGoogleId] = useState('');
-  const [crmId, setCrmId] = useState('');
+  
+  const [metaAccounts, setMetaAccounts] = useState<AdAccount[]>([]);
+  const [googleAccounts, setGoogleAccounts] = useState<AdAccount[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState({ meta: false, google: false });
   const [isSavingConnections, setIsSavingConnections] = useState(false);
 
   const supabase = createClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     fetchClients();
+    
+    const successMsg = searchParams.get('success');
+    const errorMsg = searchParams.get('error');
+    if (successMsg || errorMsg) {
+      // Remove query params after reading
+      router.replace('/dashboard/settings');
+    }
   }, []);
 
   const fetchClients = async (preserveSelection = true) => {
@@ -60,22 +79,54 @@ export default function SettingsPage() {
         return {
           ...client,
           meta_ads_account_id: metaInt?.conta_id || '',
+          meta_connected: !!metaInt?.access_token,
           google_ads_account_id: googleInt?.conta_id || '',
-          crm_account_id: crmInt?.conta_id || ''
+          google_connected: !!googleInt?.access_token,
+          crm_account_id: crmInt?.conta_id || '',
+          crm_connected: !!crmInt?.access_token
         };
       });
       setClients(mergedClients);
 
       if (preserveSelection && selectedClientId) {
-        const updatedSelected = mergedClients.find(c => c.id === selectedClientId);
-        if (updatedSelected) {
-          setMetaId(updatedSelected.meta_ads_account_id || '');
-          setGoogleId(updatedSelected.google_ads_account_id || '');
-          setCrmId(updatedSelected.crm_account_id || '');
-        }
+        handleSelectClient(selectedClientId, mergedClients);
       }
     }
     setIsLoading(false);
+  };
+
+  const handleSelectClient = (id: string, clientsList = clients) => {
+    const client = clientsList.find(c => c.id === id);
+    if (client) {
+      setSelectedClientId(id);
+      setMetaId(client.meta_ads_account_id || '');
+      setGoogleId(client.google_ads_account_id || '');
+
+      // Fetch accounts if connected
+      if (client.meta_connected) {
+        setLoadingAccounts(prev => ({ ...prev, meta: true }));
+        fetch(`/api/meta/accounts?clientId=${id}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.accounts) setMetaAccounts(data.accounts);
+            setLoadingAccounts(prev => ({ ...prev, meta: false }));
+          }).catch(() => setLoadingAccounts(prev => ({ ...prev, meta: false })));
+      } else {
+        setMetaAccounts([]);
+      }
+
+      if (client.google_connected) {
+        setLoadingAccounts(prev => ({ ...prev, google: true }));
+        fetch(`/api/google/accounts?clientId=${id}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.accounts) setGoogleAccounts(data.accounts);
+            setLoadingAccounts(prev => ({ ...prev, google: false }));
+          }).catch(() => setLoadingAccounts(prev => ({ ...prev, google: false })));
+      } else {
+        setGoogleAccounts([]);
+      }
+    }
   };
 
   const handleAddClient = async (e: React.FormEvent) => {
@@ -93,7 +144,7 @@ export default function SettingsPage() {
       setNome('');
       setIsAdding(false);
       await fetchClients(false);
-      handleSelectClient(newClient.id); // Auto-select to add connections
+      setSelectedClientId(newClient.id);
       router.refresh(); 
     }
     
@@ -124,42 +175,22 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSelectClient = (id: string) => {
-    const client = clients.find(c => c.id === id);
-    if (client) {
-      setSelectedClientId(id);
-      setMetaId(client.meta_ads_account_id || '');
-      setGoogleId(client.google_ads_account_id || '');
-      setCrmId(client.crm_account_id || '');
-    }
-  };
-
   const handleSaveConnections = async () => {
     if (!selectedClientId) return;
     setIsSavingConnections(true);
 
-    const syncIntegration = async (plataforma: string, contaId: string) => {
+    const syncAccountId = async (plataforma: string, contaId: string) => {
       if (contaId.trim()) {
-        const { data: existingInt } = await supabase
+        await supabase
           .from('integracoes_clientes')
-          .select('id')
+          .update({ conta_id: contaId.trim() })
           .eq('cliente_id', selectedClientId)
-          .eq('plataforma', plataforma)
-          .single();
-
-        if (existingInt) {
-          await supabase.from('integracoes_clientes').update({ conta_id: contaId.trim() }).eq('id', existingInt.id);
-        } else {
-          await supabase.from('integracoes_clientes').insert([{ cliente_id: selectedClientId, plataforma, conta_id: contaId.trim() }]);
-        }
-      } else {
-        await supabase.from('integracoes_clientes').delete().eq('cliente_id', selectedClientId).eq('plataforma', plataforma);
+          .eq('plataforma', plataforma);
       }
     };
 
-    await syncIntegration('meta_ads', metaId);
-    await syncIntegration('google_ads', googleId);
-    await syncIntegration('crm', crmId);
+    if (metaId) await syncAccountId('meta_ads', metaId);
+    if (googleId) await syncAccountId('google_ads', googleId);
 
     await fetchClients();
     router.refresh();
@@ -256,9 +287,9 @@ export default function SettingsPage() {
                             {client.nome}
                           </h3>
                           <div className="flex gap-2 mt-1">
-                            <span className={`w-2 h-2 rounded-full ${client.meta_ads_account_id ? 'bg-blue-500' : 'bg-zinc-800'}`} title="Meta Ads" />
-                            <span className={`w-2 h-2 rounded-full ${client.google_ads_account_id ? 'bg-emerald-500' : 'bg-zinc-800'}`} title="Google Ads" />
-                            <span className={`w-2 h-2 rounded-full ${client.crm_account_id ? 'bg-orange-500' : 'bg-zinc-800'}`} title="CRM" />
+                            <span className={`w-2 h-2 rounded-full ${client.meta_connected ? 'bg-blue-500' : 'bg-zinc-800'}`} title="Meta Ads" />
+                            <span className={`w-2 h-2 rounded-full ${client.google_connected ? 'bg-emerald-500' : 'bg-zinc-800'}`} title="Google Ads" />
+                            <span className={`w-2 h-2 rounded-full ${client.crm_connected ? 'bg-orange-500' : 'bg-zinc-800'}`} title="CRM" />
                           </div>
                         </div>
                         
@@ -319,113 +350,156 @@ export default function SettingsPage() {
               <div className="mb-8 pb-6 border-b border-[#27272a]">
                 <h2 className="text-2xl font-bold text-white mb-2">Conexões de Plataforma</h2>
                 <p className="text-zinc-400">
-                  Configure os IDs das contas para o cliente <strong className="text-white">{selectedClient.nome}</strong>.
+                  Integre e vincule as contas de anúncios para o cliente <strong className="text-white">{selectedClient.nome}</strong>.
                 </p>
               </div>
 
               <div className="space-y-6">
                 {/* Meta Ads Connection */}
-                <div className="bg-[#09090b] border border-[#27272a] rounded-xl p-5 flex flex-col md:flex-row gap-6 md:items-start transition-colors focus-within:border-blue-500/50">
-                  <div className="flex flex-col gap-3 md:w-1/3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
-                        <Activity className="w-5 h-5 text-blue-500" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-white text-sm">Meta Ads</h3>
-                        <p className="text-xs text-zinc-500">ID da Conta de Anúncios</p>
-                      </div>
+                <div className="bg-[#09090b] border border-[#27272a] rounded-xl p-5 flex flex-col md:flex-row gap-6 md:items-start transition-colors">
+                  <div className="flex items-center gap-3 md:w-1/3">
+                    <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+                      <Activity className="w-5 h-5 text-blue-500" />
                     </div>
-                    <a 
-                      href={`/api/auth/meta?clientId=${selectedClientId}`} 
-                      className="inline-flex items-center justify-center w-full md:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
-                    >
-                      Conectar App
-                    </a>
+                    <div>
+                      <h3 className="font-bold text-white text-sm">Meta Ads</h3>
+                      <p className="text-xs text-zinc-500">Facebook e Instagram</p>
+                    </div>
                   </div>
-                  <div className="flex-1 w-full">
-                    <input 
-                      type="text" 
-                      value={metaId}
-                      onChange={(e) => setMetaId(e.target.value)}
-                      placeholder="ex: act_123456789"
-                      className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-                    />
+                  
+                  <div className="flex-1 w-full flex flex-col items-start gap-3">
+                    {!selectedClient.meta_connected ? (
+                      <a 
+                        href={`/api/auth/meta?clientId=${selectedClient.id}`} 
+                        className="inline-flex items-center justify-center w-full md:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-blue-500/20"
+                      >
+                        Autorizar com Facebook
+                      </a>
+                    ) : (
+                      <div className="w-full">
+                        <div className="flex items-center gap-2 mb-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          <span className="text-xs font-semibold text-emerald-500">Autorizado</span>
+                        </div>
+                        {loadingAccounts.meta ? (
+                          <div className="flex items-center gap-2 text-zinc-400 text-sm py-2">
+                            <Loader2 className="w-4 h-4 animate-spin" /> Carregando contas...
+                          </div>
+                        ) : (
+                          <select 
+                            value={metaId}
+                            onChange={(e) => setMetaId(e.target.value)}
+                            className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+                          >
+                            <option value="">Selecione uma conta de anúncios</option>
+                            {metaAccounts.map(acc => (
+                              <option key={acc.account_id} value={acc.account_id}>
+                                {acc.name} ({acc.account_id})
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* Google Ads Connection */}
-                <div className="bg-[#09090b] border border-[#27272a] rounded-xl p-5 flex flex-col md:flex-row gap-6 md:items-start transition-colors focus-within:border-emerald-500/50">
-                  <div className="flex flex-col gap-3 md:w-1/3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-                        <Search className="w-5 h-5 text-emerald-500" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-white text-sm">Google Ads</h3>
-                        <p className="text-xs text-zinc-500">ID da Conta (10 dígitos)</p>
-                      </div>
+                <div className="bg-[#09090b] border border-[#27272a] rounded-xl p-5 flex flex-col md:flex-row gap-6 md:items-start transition-colors">
+                  <div className="flex items-center gap-3 md:w-1/3">
+                    <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                      <Search className="w-5 h-5 text-emerald-500" />
                     </div>
-                    <a 
-                      href={`/api/auth/google?clientId=${selectedClientId}`} 
-                      className="inline-flex items-center justify-center w-full md:w-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors"
-                    >
-                      Conectar App
-                    </a>
+                    <div>
+                      <h3 className="font-bold text-white text-sm">Google Ads</h3>
+                      <p className="text-xs text-zinc-500">Pesquisa e YouTube</p>
+                    </div>
                   </div>
-                  <div className="flex-1 w-full">
-                    <input 
-                      type="text" 
-                      value={googleId}
-                      onChange={(e) => setGoogleId(e.target.value)}
-                      placeholder="ex: 123-456-7890"
-                      className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 transition-colors"
-                    />
+                  
+                  <div className="flex-1 w-full flex flex-col items-start gap-3">
+                    {!selectedClient.google_connected ? (
+                      <a 
+                        href={`/api/auth/google?clientId=${selectedClient.id}`} 
+                        className="inline-flex items-center justify-center w-full md:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-emerald-500/20"
+                      >
+                        Autorizar com Google
+                      </a>
+                    ) : (
+                      <div className="w-full">
+                        <div className="flex items-center gap-2 mb-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          <span className="text-xs font-semibold text-emerald-500">Autorizado</span>
+                        </div>
+                        {loadingAccounts.google ? (
+                          <div className="flex items-center gap-2 text-zinc-400 text-sm py-2">
+                            <Loader2 className="w-4 h-4 animate-spin" /> Carregando contas...
+                          </div>
+                        ) : (
+                          <select 
+                            value={googleId}
+                            onChange={(e) => setGoogleId(e.target.value)}
+                            className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 transition-colors"
+                          >
+                            <option value="">Selecione uma conta de anúncios</option>
+                            {googleAccounts.map(acc => (
+                              <option key={acc.account_id} value={acc.account_id}>
+                                {acc.name} ({acc.account_id})
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* CRM Connection */}
-                <div className="bg-[#09090b] border border-[#27272a] rounded-xl p-5 flex flex-col md:flex-row gap-6 md:items-start transition-colors focus-within:border-orange-500/50">
-                  <div className="flex flex-col gap-3 md:w-1/3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center shrink-0">
-                        <MessageSquare className="w-5 h-5 text-orange-500" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-white text-sm">Kommo CRM</h3>
-                        <p className="text-xs text-zinc-500">ID ou Pipeline Associado</p>
-                      </div>
+                {/* Kommo CRM Connection */}
+                <div className="bg-[#09090b] border border-[#27272a] rounded-xl p-5 flex flex-col md:flex-row gap-6 md:items-start transition-colors">
+                  <div className="flex items-center gap-3 md:w-1/3">
+                    <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center shrink-0">
+                      <MessageSquare className="w-5 h-5 text-orange-500" />
                     </div>
-                    <a 
-                      href={`/api/auth/crm?clientId=${selectedClientId}`} 
-                      className="inline-flex items-center justify-center w-full md:w-auto px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold rounded-lg transition-colors"
-                    >
-                      Conectar App
-                    </a>
+                    <div>
+                      <h3 className="font-bold text-white text-sm">Kommo CRM</h3>
+                      <p className="text-xs text-zinc-500">Gestão de Vendas</p>
+                    </div>
                   </div>
-                  <div className="flex-1 w-full">
-                    <input 
-                      type="text" 
-                      value={crmId}
-                      onChange={(e) => setCrmId(e.target.value)}
-                      placeholder="ex: 123456"
-                      className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 transition-colors"
-                    />
+                  
+                  <div className="flex-1 w-full flex flex-col items-start gap-3">
+                    {!selectedClient.crm_connected ? (
+                      <a 
+                        href={`/api/auth/crm?clientId=${selectedClient.id}`} 
+                        className="inline-flex items-center justify-center w-full md:w-auto px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-orange-500/20"
+                      >
+                        Autorizar com Kommo
+                      </a>
+                    ) : (
+                      <div className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-4 py-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                          <span className="text-sm font-semibold text-white">CRM Conectado</span>
+                        </div>
+                        <span className="text-xs text-zinc-500">{selectedClient.crm_account_id}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
               </div>
 
-              <div className="mt-8 flex justify-end">
-                <button 
-                  onClick={handleSaveConnections}
-                  disabled={isSavingConnections}
-                  className="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-xl transition-colors flex items-center gap-2"
-                >
-                  {isSavingConnections ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  Salvar Conexões
-                </button>
-              </div>
+              {/* Só mostrar o botão de salvar se tivermos Dropdowns para salvar */}
+              {(selectedClient.meta_connected || selectedClient.google_connected) && (
+                <div className="mt-8 flex justify-end pt-6 border-t border-[#27272a]">
+                  <button 
+                    onClick={handleSaveConnections}
+                    disabled={isSavingConnections}
+                    className="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-xl transition-colors flex items-center gap-2 shadow-lg shadow-red-500/20"
+                  >
+                    {isSavingConnections ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Salvar Contas Selecionadas
+                  </button>
+                </div>
+              )}
 
             </div>
           ) : (
@@ -435,7 +509,7 @@ export default function SettingsPage() {
               </div>
               <h3 className="text-xl font-bold text-white mb-2">Selecione um Cliente</h3>
               <p className="text-zinc-400 max-w-sm">
-                Escolha um cliente na lista ao lado para gerenciar suas contas de Meta Ads, Google Ads e CRM.
+                Escolha um cliente na lista ao lado para autorizar e vincular contas.
               </p>
             </div>
           )}
