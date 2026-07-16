@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { Plus, Trash2, Edit2, Loader2, Save, X, Building, LogOut, Activity, Search, MessageSquare, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -21,7 +21,7 @@ interface AdAccount {
   name: string;
 }
 
-export default function SettingsPage() {
+function SettingsContent() {
   const [clients, setClients] = useState<Client[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
@@ -48,16 +48,39 @@ export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  useEffect(() => {
-    fetchClients();
-    
-    const successMsg = searchParams.get('success');
-    const errorMsg = searchParams.get('error');
-    if (successMsg || errorMsg) {
-      // Remove query params after reading
-      router.replace('/dashboard/settings');
+  const handleSelectClient = (id: string, clientsList = clients) => {
+    const client = clientsList.find(c => c.id === id);
+    if (client) {
+      setSelectedClientId(id);
+      setMetaId(client.meta_ads_account_id || '');
+      setGoogleId(client.google_ads_account_id || '');
+
+      // Fetch accounts if connected
+      if (client.meta_connected) {
+        setLoadingAccounts(prev => ({ ...prev, meta: true }));
+        fetch(`/api/meta/accounts?clientId=${id}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.accounts) setMetaAccounts(data.accounts);
+            setLoadingAccounts(prev => ({ ...prev, meta: false }));
+          }).catch(() => setLoadingAccounts(prev => ({ ...prev, meta: false })));
+      } else {
+        setMetaAccounts([]);
+      }
+
+      if (client.google_connected) {
+        setLoadingAccounts(prev => ({ ...prev, google: true }));
+        fetch(`/api/google/accounts?clientId=${id}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.accounts) setGoogleAccounts(data.accounts);
+            setLoadingAccounts(prev => ({ ...prev, google: false }));
+          }).catch(() => setLoadingAccounts(prev => ({ ...prev, google: false })));
+      } else {
+        setGoogleAccounts([]);
+      }
     }
-  }, []);
+  };
 
   const fetchClients = async (preserveSelection = true) => {
     const { data: clientsData } = await supabase
@@ -95,39 +118,17 @@ export default function SettingsPage() {
     setIsLoading(false);
   };
 
-  const handleSelectClient = (id: string, clientsList = clients) => {
-    const client = clientsList.find(c => c.id === id);
-    if (client) {
-      setSelectedClientId(id);
-      setMetaId(client.meta_ads_account_id || '');
-      setGoogleId(client.google_ads_account_id || '');
-
-      // Fetch accounts if connected
-      if (client.meta_connected) {
-        setLoadingAccounts(prev => ({ ...prev, meta: true }));
-        fetch(`/api/meta/accounts?clientId=${id}`)
-          .then(res => res.json())
-          .then(data => {
-            if (data.accounts) setMetaAccounts(data.accounts);
-            setLoadingAccounts(prev => ({ ...prev, meta: false }));
-          }).catch(() => setLoadingAccounts(prev => ({ ...prev, meta: false })));
-      } else {
-        setMetaAccounts([]);
-      }
-
-      if (client.google_connected) {
-        setLoadingAccounts(prev => ({ ...prev, google: true }));
-        fetch(`/api/google/accounts?clientId=${id}`)
-          .then(res => res.json())
-          .then(data => {
-            if (data.accounts) setGoogleAccounts(data.accounts);
-            setLoadingAccounts(prev => ({ ...prev, google: false }));
-          }).catch(() => setLoadingAccounts(prev => ({ ...prev, google: false })));
-      } else {
-        setGoogleAccounts([]);
-      }
+  useEffect(() => {
+    fetchClients();
+    
+    const successMsg = searchParams.get('success');
+    const errorMsg = searchParams.get('error');
+    if (successMsg || errorMsg) {
+      // Remove query params after reading
+      router.replace('/dashboard/settings');
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, router]);
 
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -517,5 +518,17 @@ export default function SettingsPage() {
 
       </div>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={
+      <div className="p-8 flex justify-center items-center min-h-[400px]">
+        <Loader2 className="w-8 h-8 animate-spin text-red-500" />
+      </div>
+    }>
+      <SettingsContent />
+    </Suspense>
   );
 }
