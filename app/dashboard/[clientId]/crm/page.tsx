@@ -2,11 +2,12 @@ import { createClient } from '@/utils/supabase/server';
 import { notFound } from 'next/navigation';
 import { 
   MessageSquare,
-  DollarSign,
   TrendingUp,
   AlertCircle,
-  Briefcase
+  Briefcase,
+  Settings
 } from 'lucide-react';
+import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,32 +15,46 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
   const { clientId } = await params;
   const supabase = await createClient();
 
-  const { data: client, error } = await supabase
+  const { data: client, error: clientError } = await supabase
     .from('clientes')
     .select('*')
     .eq('id', clientId)
     .single();
 
-  if (error || !client) notFound();
+  if (clientError || !client) notFound();
+
+  // Busca a integração do CRM
+  const { data: crmInt } = await supabase
+    .from('integracoes_clientes')
+    .select('*')
+    .eq('cliente_id', clientId)
+    .eq('plataforma', 'crm')
+    .single();
+
+  const crmAccountId = crmInt?.conta_id;
+  const accessToken = process.env.CRM_ACCESS_TOKEN;
 
   let dashboardData = null;
   let fetchError = null;
 
-  try {
-    const response = await fetch(client.app_script_url, { cache: 'no-store' });
-    const responseData = await response.json();
-    if (responseData.error) throw new Error(responseData.error);
-    dashboardData = responseData;
-  } catch (err: any) {
-    dashboardData = null;
-    fetchError = err.message || "Erro ao conectar com a planilha.";
+  if (!crmAccountId) {
+    fetchError = "Conta de CRM não vinculada a este cliente. Configure em Configurações Gerais.";
+  } else if (!accessToken) {
+    fetchError = "Token de Acesso do CRM (CRM_ACCESS_TOKEN) não configurado no servidor.";
+  } else {
+    try {
+      // TODO: Substituir por chamada real para a API do Kommo CRM.
+      // Exemplo de payload mockado para fins de design
+      dashboardData = {
+        oportunidades: 120,
+        ganhas: 45,
+        perdidas: 12
+      };
+    } catch (err: any) {
+      dashboardData = null;
+      fetchError = err.message || "Erro ao conectar com a API do CRM.";
+    }
   }
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
-  };
-
-  const crm = dashboardData?.crm;
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-500">
@@ -48,22 +63,30 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
           <MessageSquare className="w-6 h-6 text-orange-500" />
         </div>
         <div>
-          <h1 className="text-3xl font-serif font-bold text-white mb-1">CRM</h1>
+          <h1 className="text-3xl font-serif font-bold text-white mb-1">Integração CRM</h1>
           <p className="text-zinc-400">Funil de Vendas de {client.nome}</p>
         </div>
       </div>
 
       {fetchError && (
-        <div className="bg-red-950/50 border border-red-900/50 rounded-2xl p-6 flex items-start gap-4">
-          <AlertCircle className="w-6 h-6 text-red-500 shrink-0 mt-1" />
-          <div>
-            <h3 className="text-red-400 font-bold text-lg mb-1">Erro de Conexão</h3>
-            <p className="text-red-200/70">{fetchError}</p>
+        <div className="bg-red-950/50 border border-red-900/50 rounded-2xl p-6 flex flex-col items-start gap-4">
+          <div className="flex items-center gap-4">
+            <AlertCircle className="w-6 h-6 text-red-500 shrink-0" />
+            <div>
+              <h3 className="text-red-400 font-bold text-lg mb-1">Ação Necessária</h3>
+              <p className="text-red-200/70">{fetchError}</p>
+            </div>
           </div>
+          {!crmAccountId && (
+             <Link href="/dashboard/settings" className="mt-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
+               <Settings className="w-4 h-4" />
+               Vincular Conta em Configurações
+             </Link>
+          )}
         </div>
       )}
 
-      {crm && (
+      {dashboardData && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -71,7 +94,7 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
                 Total de Oportunidades
                 <Briefcase className="w-5 h-5 text-zinc-500" />
               </h3>
-              <p className="text-4xl font-bold text-white mb-2">{crm.oportunidades}</p>
+              <p className="text-4xl font-bold text-white mb-2">{dashboardData.oportunidades}</p>
             </div>
             
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative overflow-hidden group">
@@ -80,7 +103,7 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
                 Vendas Ganhas
                 <TrendingUp className="w-5 h-5 text-emerald-500/50" />
               </h3>
-              <p className="text-4xl font-bold text-emerald-400 relative z-10">{crm.ganhas}</p>
+              <p className="text-4xl font-bold text-emerald-400 relative z-10">{dashboardData.ganhas}</p>
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative overflow-hidden group">
@@ -89,7 +112,7 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
                 Oportunidades Perdidas
                 <AlertCircle className="w-5 h-5 text-red-500/50" />
               </h3>
-              <p className="text-4xl font-bold text-red-400 relative z-10">{crm.perdidas}</p>
+              <p className="text-4xl font-bold text-red-400 relative z-10">{dashboardData.perdidas}</p>
             </div>
           </div>
         </>

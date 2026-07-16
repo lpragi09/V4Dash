@@ -2,13 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/utils/supabase/client';
-import { Plus, Trash2, Edit2, Loader2, Save, X, Building, LogOut, Activity } from 'lucide-react';
+import { Plus, Trash2, Edit2, Loader2, Save, X, Building, LogOut, Activity, Search, MessageSquare } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 interface Client {
   id: string;
   nome: string;
   meta_ads_account_id?: string;
+  google_ads_account_id?: string;
+  crm_account_id?: string;
 }
 
 export default function SettingsPage() {
@@ -20,6 +22,8 @@ export default function SettingsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editNome, setEditNome] = useState('');
   const [editMetaId, setEditMetaId] = useState('');
+  const [editGoogleId, setEditGoogleId] = useState('');
+  const [editCrmId, setEditCrmId] = useState('');
 
   const supabase = createClient();
   const router = useRouter();
@@ -27,6 +31,8 @@ export default function SettingsPage() {
   // Add Form states
   const [nome, setNome] = useState('');
   const [metaId, setMetaId] = useState('');
+  const [googleId, setGoogleId] = useState('');
+  const [crmId, setCrmId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -44,13 +50,18 @@ export default function SettingsPage() {
       const { data: integrations } = await supabase
         .from('integracoes_clientes')
         .select('*')
-        .eq('plataforma', 'meta_ads');
+        .in('plataforma', ['meta_ads', 'google_ads', 'crm']);
 
       const mergedClients = clientsData.map(client => {
-        const metaInt = integrations?.find(i => i.cliente_id === client.id);
+        const metaInt = integrations?.find(i => i.cliente_id === client.id && i.plataforma === 'meta_ads');
+        const googleInt = integrations?.find(i => i.cliente_id === client.id && i.plataforma === 'google_ads');
+        const crmInt = integrations?.find(i => i.cliente_id === client.id && i.plataforma === 'crm');
+        
         return {
           ...client,
-          meta_ads_account_id: metaInt?.conta_id || ''
+          meta_ads_account_id: metaInt?.conta_id || '',
+          google_ads_account_id: googleInt?.conta_id || '',
+          crm_account_id: crmInt?.conta_id || ''
         };
       });
       setClients(mergedClients);
@@ -70,19 +81,20 @@ export default function SettingsPage() {
       .single();
 
     if (newClient && !clientError) {
-      // 2. Se informou o ID do Meta Ads, cria a integração
-      if (metaId) {
-        await supabase
-          .from('integracoes_clientes')
-          .insert([{
-            cliente_id: newClient.id,
-            plataforma: 'meta_ads',
-            conta_id: metaId
-          }]);
+      // 2. Cria as integrações se informadas
+      const insertIntegrations = [];
+      if (metaId) insertIntegrations.push({ cliente_id: newClient.id, plataforma: 'meta_ads', conta_id: metaId });
+      if (googleId) insertIntegrations.push({ cliente_id: newClient.id, plataforma: 'google_ads', conta_id: googleId });
+      if (crmId) insertIntegrations.push({ cliente_id: newClient.id, plataforma: 'crm', conta_id: crmId });
+
+      if (insertIntegrations.length > 0) {
+        await supabase.from('integracoes_clientes').insert(insertIntegrations);
       }
 
       setNome('');
       setMetaId('');
+      setGoogleId('');
+      setCrmId('');
       setIsAdding(false);
       fetchClients();
       router.refresh(); 
@@ -100,37 +112,29 @@ export default function SettingsPage() {
       .update({ nome: editNome })
       .eq('id', id);
 
-    // Atualiza ou insere integração do Meta Ads
-    if (editMetaId) {
-      const { data: existingInt } = await supabase
-        .from('integracoes_clientes')
-        .select('id')
-        .eq('cliente_id', id)
-        .eq('plataforma', 'meta_ads')
-        .single();
+    // Função auxiliar para atualizar/inserir/deletar integração
+    const syncIntegration = async (plataforma: string, contaId: string) => {
+      if (contaId) {
+        const { data: existingInt } = await supabase
+          .from('integracoes_clientes')
+          .select('id')
+          .eq('cliente_id', id)
+          .eq('plataforma', plataforma)
+          .single();
 
-      if (existingInt) {
-        await supabase
-          .from('integracoes_clientes')
-          .update({ conta_id: editMetaId })
-          .eq('id', existingInt.id);
+        if (existingInt) {
+          await supabase.from('integracoes_clientes').update({ conta_id: contaId }).eq('id', existingInt.id);
+        } else {
+          await supabase.from('integracoes_clientes').insert([{ cliente_id: id, plataforma, conta_id: contaId }]);
+        }
       } else {
-        await supabase
-          .from('integracoes_clientes')
-          .insert([{
-            cliente_id: id,
-            plataforma: 'meta_ads',
-            conta_id: editMetaId
-          }]);
+        await supabase.from('integracoes_clientes').delete().eq('cliente_id', id).eq('plataforma', plataforma);
       }
-    } else {
-      // Se limpou o campo, remove a integração
-      await supabase
-        .from('integracoes_clientes')
-        .delete()
-        .eq('cliente_id', id)
-        .eq('plataforma', 'meta_ads');
-    }
+    };
+
+    await syncIntegration('meta_ads', editMetaId);
+    await syncIntegration('google_ads', editGoogleId);
+    await syncIntegration('crm', editCrmId);
 
     setEditingId(null);
     fetchClients();
@@ -235,6 +239,26 @@ export default function SettingsPage() {
                       placeholder="ex: act_123456789"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">ID do Google Ads</label>
+                    <input 
+                      type="text" 
+                      value={googleId}
+                      onChange={(e) => setGoogleId(e.target.value)}
+                      className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-3 py-2 text-white focus:outline-none focus:border-red-500 transition-colors"
+                      placeholder="ex: 123-456-7890"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">ID do Kommo CRM</label>
+                    <input 
+                      type="text" 
+                      value={crmId}
+                      onChange={(e) => setCrmId(e.target.value)}
+                      className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-3 py-2 text-white focus:outline-none focus:border-red-500 transition-colors"
+                      placeholder="ex: 123456"
+                    />
+                  </div>
                 </div>
                 <div className="mt-4 flex justify-end">
                   <button 
@@ -262,7 +286,7 @@ export default function SettingsPage() {
                   <div key={client.id} className="bg-[#09090b] border border-[#27272a] rounded-xl p-4 transition-colors hover:border-zinc-700">
                     {editingId === client.id ? (
                       <div className="space-y-3">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                           <input 
                             type="text" 
                             value={editNome}
@@ -274,7 +298,21 @@ export default function SettingsPage() {
                             type="text" 
                             value={editMetaId}
                             onChange={(e) => setEditMetaId(e.target.value)}
-                            placeholder="ID da Conta Meta Ads (act_...)"
+                            placeholder="Meta Ads ID"
+                            className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500"
+                          />
+                          <input 
+                            type="text" 
+                            value={editGoogleId}
+                            onChange={(e) => setEditGoogleId(e.target.value)}
+                            placeholder="Google Ads ID"
+                            className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500"
+                          />
+                          <input 
+                            type="text" 
+                            value={editCrmId}
+                            onChange={(e) => setEditCrmId(e.target.value)}
+                            placeholder="CRM ID"
                             className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500"
                           />
                         </div>
@@ -295,14 +333,34 @@ export default function SettingsPage() {
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div>
                           <h3 className="text-lg font-bold text-white mb-1">{client.nome}</h3>
-                          {client.meta_ads_account_id ? (
-                            <div className="flex items-center gap-2 text-xs text-zinc-500">
-                              <Activity className="w-3 h-3 text-blue-500" />
-                              <span>Meta Ads: <span className="text-zinc-300">{client.meta_ads_account_id}</span></span>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-red-500/70">Nenhuma conta Meta Ads vinculada</span>
-                          )}
+                          <div className="flex flex-wrap items-center gap-3 mt-2">
+                            {client.meta_ads_account_id ? (
+                              <div className="flex items-center gap-1.5 text-xs text-zinc-500 bg-[#18181b] px-2 py-1 rounded-md border border-[#27272a]">
+                                <Activity className="w-3 h-3 text-blue-500" />
+                                <span>Meta: <span className="text-zinc-300">{client.meta_ads_account_id}</span></span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-red-500/70">Sem Meta Ads</span>
+                            )}
+                            
+                            {client.google_ads_account_id ? (
+                              <div className="flex items-center gap-1.5 text-xs text-zinc-500 bg-[#18181b] px-2 py-1 rounded-md border border-[#27272a]">
+                                <Search className="w-3 h-3 text-emerald-500" />
+                                <span>Google: <span className="text-zinc-300">{client.google_ads_account_id}</span></span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-red-500/70">Sem Google Ads</span>
+                            )}
+
+                            {client.crm_account_id ? (
+                              <div className="flex items-center gap-1.5 text-xs text-zinc-500 bg-[#18181b] px-2 py-1 rounded-md border border-[#27272a]">
+                                <MessageSquare className="w-3 h-3 text-orange-500" />
+                                <span>CRM: <span className="text-zinc-300">{client.crm_account_id}</span></span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-red-500/70">Sem CRM</span>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
                           <button 
@@ -310,6 +368,8 @@ export default function SettingsPage() {
                               setEditingId(client.id);
                               setEditNome(client.nome);
                               setEditMetaId(client.meta_ads_account_id || '');
+                              setEditGoogleId(client.google_ads_account_id || '');
+                              setEditCrmId(client.crm_account_id || '');
                             }}
                             className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
                             title="Editar"
