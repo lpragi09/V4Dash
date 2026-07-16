@@ -326,16 +326,24 @@ export default function SettingsPage() {
               <div className="space-y-6">
                 {/* Meta Ads Connection */}
                 <div className="bg-[#09090b] border border-[#27272a] rounded-xl p-5 flex flex-col md:flex-row gap-6 md:items-start transition-colors focus-within:border-blue-500/50">
-                  <div className="flex items-center gap-3 md:w-1/3">
-                    <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
-                      <Activity className="w-5 h-5 text-blue-500" />
+                  <div className="flex flex-col gap-3 md:w-1/3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+                        <Activity className="w-5 h-5 text-blue-500" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-white text-sm">Meta Ads</h3>
+                        <p className="text-xs text-zinc-500">ID da Conta de Anúncios</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-bold text-white text-sm">Meta Ads</h3>
-                      <p className="text-xs text-zinc-500">ID da Conta de Anúncios</p>
-                    </div>
+                    <a 
+                      href={`/api/auth/meta?clientId=${selectedClientId}`} 
+                      className="inline-flex items-center justify-center w-full md:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      Conectar App
+                    </a>
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 w-full">
                     <input 
                       type="text" 
                       value={metaId}
@@ -348,16 +356,24 @@ export default function SettingsPage() {
 
                 {/* Google Ads Connection */}
                 <div className="bg-[#09090b] border border-[#27272a] rounded-xl p-5 flex flex-col md:flex-row gap-6 md:items-start transition-colors focus-within:border-emerald-500/50">
-                  <div className="flex items-center gap-3 md:w-1/3">
-                    <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-                      <Search className="w-5 h-5 text-emerald-500" />
+                  <div className="flex flex-col gap-3 md:w-1/3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                        <Search className="w-5 h-5 text-emerald-500" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-white text-sm">Google Ads</h3>
+                        <p className="text-xs text-zinc-500">ID da Conta (10 dígitos)</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-bold text-white text-sm">Google Ads</h3>
-                      <p className="text-xs text-zinc-500">ID da Conta (10 dígitos)</p>
-                    </div>
+                    <a 
+                      href={`/api/auth/google?clientId=${selectedClientId}`} 
+                      className="inline-flex items-center justify-center w-full md:w-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      Conectar App
+                    </a>
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 w-full">
                     <input 
                       type="text" 
                       value={googleId}
@@ -370,16 +386,24 @@ export default function SettingsPage() {
 
                 {/* CRM Connection */}
                 <div className="bg-[#09090b] border border-[#27272a] rounded-xl p-5 flex flex-col md:flex-row gap-6 md:items-start transition-colors focus-within:border-orange-500/50">
-                  <div className="flex items-center gap-3 md:w-1/3">
-                    <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center shrink-0">
-                      <MessageSquare className="w-5 h-5 text-orange-500" />
+                  <div className="flex flex-col gap-3 md:w-1/3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center shrink-0">
+                        <MessageSquare className="w-5 h-5 text-orange-500" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-white text-sm">Kommo CRM</h3>
+                        <p className="text-xs text-zinc-500">ID ou Pipeline Associado</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-bold text-white text-sm">Kommo CRM</h3>
-                      <p className="text-xs text-zinc-500">ID ou Pipeline Associado</p>
-                    </div>
+                    <a 
+                      href={`/api/auth/crm?clientId=${selectedClientId}`} 
+                      className="inline-flex items-center justify-center w-full md:w-auto px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      Conectar App
+                    </a>
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 w-full">
                     <input 
                       type="text" 
                       value={crmId}
