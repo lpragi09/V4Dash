@@ -27,33 +27,83 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
     notFound();
   }
 
-  let dashboardData = null;
   let fetchError = null;
 
-  try {
-    if (!client.app_script_url) {
-      throw new Error("Planilha de dados não vinculada a este cliente. Configure a URL nas Configurações Gerais.");
+  // Busca integrações
+  const { data: integrations, error: intError } = await supabase
+    .from('integracoes_clientes')
+    .select('*')
+    .eq('cliente_id', clientId);
+
+  if (intError) {
+    console.error("Error fetching integrations:", intError);
+  }
+
+  const metaInt = integrations?.find(i => i.plataforma === 'meta_ads');
+  const googleInt = integrations?.find(i => i.plataforma === 'google_ads');
+  const crmInt = integrations?.find(i => i.plataforma === 'crm');
+
+  let metaData = { gastos: 0, leads: 0, cpl: 0 };
+  let googleData = { gastos: 0, leads: 0, cpl: 0 };
+  let crmData = { oportunidades: 0, ganhas: 0, perdidas: 0 };
+
+  // Fetch Meta (Últimos 30 dias)
+  if (metaInt?.access_token && metaInt?.conta_id) {
+    try {
+      const normalizedAccountId = metaInt.conta_id.startsWith('act_') ? metaInt.conta_id : `act_${metaInt.conta_id}`;
+      const url = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${metaInt.access_token}&date_preset=last_30d&fields=spend,actions`;
+      const res = await fetch(url, { cache: 'no-store' });
+      const json = await res.json();
+      
+      const insights = json.data && json.data.length > 0 ? json.data[0] : null;
+      
+      let leadsCount = 0;
+      if (insights?.actions) {
+        const leadAction = insights.actions.find((a: any) => a.action_type === 'lead');
+        if (leadAction) leadsCount = parseInt(leadAction.value);
+      }
+      const spend = insights ? parseFloat(insights.spend || '0') : 0;
+      
+      metaData = {
+        gastos: spend,
+        leads: leadsCount,
+        cpl: leadsCount > 0 ? spend / leadsCount : 0
+      };
+    } catch(err) {
+      console.error("Error fetching Meta Ads:", err);
     }
-    // Fetch data from Google Apps Script
-    const response = await fetch(client.app_script_url, { 
-      cache: 'no-store' // Sempre puxa os dados ao vivo sem cache
-    });
-    
-    if (!response.ok) {
-      throw new Error('Falha ao buscar dados da planilha');
-    }
-    
-    const responseData = await response.json();
-    
-    if (responseData.error) {
-      throw new Error(responseData.error);
-    }
-    
-    dashboardData = responseData;
-  } catch (err: any) {
-    console.error("Error fetching App Script:", err);
-    dashboardData = null;
-    fetchError = err.message || "Erro ao conectar com a planilha do Google Drive. Verifique se a URL do Web App está correta e pública.";
+  }
+
+  // Fetch Google (Mock até ter o token MCC oficial)
+  if (googleInt?.access_token && googleInt?.conta_id) {
+    googleData = { gastos: 1543.20, leads: 42, cpl: 1543.20 / 42 };
+  }
+
+  // Fetch CRM (Mock)
+  if (crmInt?.access_token) {
+    crmData = { oportunidades: 120, ganhas: 45, perdidas: 12 };
+  }
+
+  // Aggregate Data
+  const totalGastos = metaData.gastos + googleData.gastos;
+  const totalLeads = metaData.leads + googleData.leads;
+  const cplGeral = totalLeads > 0 ? totalGastos / totalLeads : 0;
+  const receitaCRM = crmData.ganhas * 1500; // Ticket médio mockado
+
+  const dashboardData = {
+    visao_geral: {
+      receita: receitaCRM,
+      investimento_total: totalGastos,
+      leads_totais: totalLeads,
+      cpl_geral: cplGeral
+    },
+    meta_ads: metaData,
+    google_ads: googleData,
+    crm: crmData
+  };
+
+  if (!metaInt?.access_token && !googleInt?.access_token && !crmInt?.access_token) {
+    fetchError = "Nenhuma integração conectada. Vá em Configurações Gerais para vincular Meta Ads, Google Ads e Kommo CRM.";
   }
 
   const formatCurrency = (value: number) => {

@@ -42,8 +42,9 @@ export default function Sidebar() {
   const navItems = [
     { name: 'Acomp. Mensal', href: clientId ? `/dashboard/${clientId}` : '/dashboard', icon: LayoutDashboard },
     { name: 'Acomp. Semanal', href: clientId ? `/dashboard/${clientId}/semanal` : '/dashboard/semanal', icon: Calendar },
-    { name: 'bd Meta Ads', href: clientId ? `/dashboard/${clientId}/meta-ads` : '/dashboard/meta-ads', icon: Activity },
-    { name: 'bd Google Ads', href: clientId ? `/dashboard/${clientId}/google-ads` : '/dashboard/google-ads', icon: Search },
+    { name: 'Meta Ads', href: clientId ? `/dashboard/${clientId}/meta-ads` : '/dashboard/meta-ads', icon: Activity },
+    { name: 'Google Ads', href: clientId ? `/dashboard/${clientId}/google-ads` : '/dashboard/google-ads', icon: Search },
+    { name: 'Kommo CRM', href: clientId ? `/dashboard/${clientId}/crm` : '/dashboard/crm', icon: MessageSquare },
   ];
 
   return (
