@@ -34,6 +34,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
     .single();
 
   const googleAccountId = googleInt?.conta_id;
+  const accessToken = googleInt?.access_token;
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 
   let dashboardData = null;
@@ -41,6 +42,8 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
 
   if (!googleAccountId) {
     fetchError = "Conta do Google Ads não vinculada a este cliente. Configure em Configurações Gerais.";
+  } else if (!accessToken) {
+    fetchError = "Cliente não conectou o Google Ads (Access Token ausente).";
   } else if (!developerToken) {
     fetchError = "Token de Desenvolvedor do Google Ads (GOOGLE_ADS_DEVELOPER_TOKEN) não configurado no servidor.";
   } else {

@@ -44,9 +44,51 @@ function SettingsContent() {
   const [loadingAccounts, setLoadingAccounts] = useState({ meta: false, google: false });
   const [isSavingConnections, setIsSavingConnections] = useState(false);
 
+  // Kommo manual connection states
+  const [kommoSubdomain, setKommoSubdomain] = useState('');
+  const [kommoIntegrationId, setKommoIntegrationId] = useState('');
+  const [kommoSecretKey, setKommoSecretKey] = useState('');
+  const [kommoAuthCode, setKommoAuthCode] = useState('');
+  const [isConnectingKommo, setIsConnectingKommo] = useState(false);
+  const [kommoError, setKommoError] = useState('');
+
   const supabase = createClient();
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const handleConnectKommo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedClientId) return;
+    setIsConnectingKommo(true);
+    setKommoError('');
+
+    try {
+      const res = await fetch('/api/crm/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId: selectedClientId,
+          subdomain: kommoSubdomain,
+          integrationId: kommoIntegrationId,
+          secretKey: kommoSecretKey,
+          authCode: kommoAuthCode,
+          redirectUri: window.location.origin
+        })
+      });
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.error || 'Erro ao conectar ao Kommo.');
+
+      await fetchClients(true);
+      setKommoSubdomain('');
+      setKommoIntegrationId('');
+      setKommoSecretKey('');
+      setKommoAuthCode('');
+    } catch (error: any) {
+      setKommoError(error.message);
+    }
+    setIsConnectingKommo(false);
+  };
 
   const handleSelectClient = (id: string, clientsList = clients) => {
     const client = clientsList.find(c => c.id === id);
@@ -468,12 +510,37 @@ function SettingsContent() {
                   
                   <div className="flex-1 w-full flex flex-col items-start gap-3">
                     {!selectedClient.crm_connected ? (
-                      <a 
-                        href={`/api/auth/crm?clientId=${selectedClient.id}`} 
-                        className="inline-flex items-center justify-center w-full md:w-auto px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-orange-500/20"
-                      >
-                        Autorizar com Kommo
-                      </a>
+                      <form onSubmit={handleConnectKommo} className="w-full space-y-3 bg-[#18181b] border border-[#27272a] rounded-xl p-4">
+                        <div className="text-sm font-semibold text-white mb-2">Conectar Integração Privada</div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-zinc-400 mb-1">Subdomínio (ex: minhaloja)</label>
+                            <input type="text" required value={kommoSubdomain} onChange={e => setKommoSubdomain(e.target.value)} className="w-full bg-[#09090b] border border-[#27272a] rounded-lg px-3 py-2 text-white text-xs focus:border-orange-500 outline-none" placeholder="minhaloja" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-zinc-400 mb-1">ID da Integração</label>
+                            <input type="text" required value={kommoIntegrationId} onChange={e => setKommoIntegrationId(e.target.value)} className="w-full bg-[#09090b] border border-[#27272a] rounded-lg px-3 py-2 text-white text-xs focus:border-orange-500 outline-none" placeholder="Client ID" />
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-xs text-zinc-400 mb-1">Chave Secreta</label>
+                            <input type="password" required value={kommoSecretKey} onChange={e => setKommoSecretKey(e.target.value)} className="w-full bg-[#09090b] border border-[#27272a] rounded-lg px-3 py-2 text-white text-xs focus:border-orange-500 outline-none" placeholder="Client Secret" />
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-xs text-zinc-400 mb-1">Código de Autorização</label>
+                            <input type="text" required value={kommoAuthCode} onChange={e => setKommoAuthCode(e.target.value)} className="w-full bg-[#09090b] border border-[#27272a] rounded-lg px-3 py-2 text-white text-xs focus:border-orange-500 outline-none" placeholder="Code (válido por 20min)" />
+                          </div>
+                        </div>
+
+                        {kommoError && <div className="text-xs text-red-500 mt-2 bg-red-500/10 p-2 rounded-lg">{kommoError}</div>}
+
+                        <button type="submit" disabled={isConnectingKommo} className="w-full mt-2 px-4 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2">
+                          {isConnectingKommo ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Conectar ao Kommo'}
+                        </button>
+                        <p className="text-[10px] text-zinc-500 text-center mt-2">
+                          Crie a integração no Kommo em Configurações &gt; Integrações &gt; Criar Integração Privada. Use <strong>{typeof window !== 'undefined' ? window.location.origin : 'esta URL'}</strong> como Redirect URI.
+                        </p>
+                      </form>
                     ) : (
                       <div className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-4 py-3 flex items-center justify-between">
                         <div className="flex items-center gap-2">

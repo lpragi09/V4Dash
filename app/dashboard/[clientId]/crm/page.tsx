@@ -32,7 +32,7 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
     .single();
 
   const crmAccountId = crmInt?.conta_id;
-  const accessToken = process.env.CRM_ACCESS_TOKEN;
+  const accessToken = crmInt?.access_token;
 
   let dashboardData = null;
   let fetchError = null;
@@ -40,7 +40,7 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
   if (!crmAccountId) {
     fetchError = "Conta de CRM não vinculada a este cliente. Configure em Configurações Gerais.";
   } else if (!accessToken) {
-    fetchError = "Token de Acesso do CRM (CRM_ACCESS_TOKEN) não configurado no servidor.";
+    fetchError = "Token de Acesso do CRM não encontrado para este cliente.";
   } else {
     try {
       // TODO: Substituir por chamada real para a API do Kommo CRM.

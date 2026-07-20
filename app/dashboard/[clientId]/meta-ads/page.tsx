@@ -33,7 +33,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
     .single();
 
   const metaAccountId = metaInt?.conta_id;
-  const accessToken = process.env.META_ACCESS_TOKEN;
+  const accessToken = metaInt?.access_token;
 
   let dashboardData = null;
   let fetchError = null;
