@@ -23,6 +23,9 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
   let fetchError = null;
 
   try {
+    if (!client.app_script_url) {
+      throw new Error("Planilha de dados não vinculada a este cliente. Configure a URL nas Configurações Gerais.");
+    }
     const response = await fetch(client.app_script_url, { cache: 'no-store' });
     const responseData = await response.json();
     if (responseData.error) throw new Error(responseData.error);

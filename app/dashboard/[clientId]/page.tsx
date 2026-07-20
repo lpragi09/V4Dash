@@ -31,6 +31,9 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   let fetchError = null;
 
   try {
+    if (!client.app_script_url) {
+      throw new Error("Planilha de dados não vinculada a este cliente. Configure a URL nas Configurações Gerais.");
+    }
     // Fetch data from Google Apps Script
     const response = await fetch(client.app_script_url, { 
       cache: 'no-store' // Sempre puxa os dados ao vivo sem cache
@@ -59,7 +62,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+      <div className="flex items-center gap-4 relative z-10">
         <div className="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center border border-red-500/20">
           <LayoutDashboard className="w-6 h-6 text-red-500" />
         </div>

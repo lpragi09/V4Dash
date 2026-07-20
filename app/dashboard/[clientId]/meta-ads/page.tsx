@@ -45,7 +45,8 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
   } else {
     try {
       // Faz a chamada real para a Graph API do Meta (Insights dos últimos 30 dias)
-      const url = `https://graph.facebook.com/v19.0/${metaAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&fields=spend,clicks,actions`;
+      const normalizedAccountId = metaAccountId.startsWith('act_') ? metaAccountId : `act_${metaAccountId}`;
+      const url = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&fields=spend,clicks,actions`;
       const response = await fetch(url, { cache: 'no-store' });
       const responseData = await response.json();
       

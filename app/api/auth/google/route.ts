@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+export async function GET(request: NextRequest) {
+  const { searchParams, origin } = request.nextUrl;
   const clientId = searchParams.get('clientId');
 
   if (!clientId) {
