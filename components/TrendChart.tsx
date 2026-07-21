@@ -21,8 +21,9 @@ interface ChartSeries {
 interface TrendChartProps {
   series: ChartSeries[];
   height?: number;
-  valueFormatter?: (value: number) => string;
-  dateFormatter?: (date: string) => string;
+  /** Server Components não podem passar funções como prop para Client Components — por
+   *  isso o formato é uma flag serializável, e o formatador real vive aqui dentro. */
+  format?: 'currency' | 'number';
 }
 
 const WIDTH = 800;
@@ -31,18 +32,16 @@ const PAD_RIGHT = 16;
 const PAD_TOP = 16;
 const PAD_BOTTOM = 28;
 
-const defaultValueFormatter = (v: number) => v.toLocaleString('pt-BR');
-const defaultDateFormatter = (d: string) => {
+const numberFormatter = (v: number) => v.toLocaleString('pt-BR');
+const currencyFormatter = (v: number) =>
+  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+const dateFormatter = (d: string) => {
   const date = new Date(`${d}T00:00:00`);
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 };
 
-export default function TrendChart({
-  series,
-  height = 240,
-  valueFormatter = defaultValueFormatter,
-  dateFormatter = defaultDateFormatter,
-}: TrendChartProps) {
+export default function TrendChart({ series, height = 240, format = 'number' }: TrendChartProps) {
+  const valueFormatter = format === 'currency' ? currencyFormatter : numberFormatter;
   const gradientId = useId();
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 

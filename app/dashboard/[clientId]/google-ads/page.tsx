@@ -221,7 +221,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
               <h3 className="text-white font-bold mb-4">Gasto Diário</h3>
               <TrendChart
                 series={[{ name: 'Gasto', color: 'emerald', points: dailySpend }]}
-                valueFormatter={formatCurrency}
+                format="currency"
               />
             </div>
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">

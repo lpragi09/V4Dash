@@ -285,7 +285,7 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
                   { name: 'Meta Ads', color: 'blue', points: metaDailySpend },
                   { name: 'Google Ads', color: 'emerald', points: googleDailySpend },
                 ]}
-                valueFormatter={formatCurrency}
+                format="currency"
               />
             </div>
           )}
