@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import TrendChart from '@/components/TrendChart';
+import InfoTooltip from '@/components/InfoTooltip';
 
 export const dynamic = 'force-dynamic';
 
@@ -155,7 +156,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Gasto Total
+                <span className="flex items-center gap-1.5">
+                  Gasto Total
+                  <InfoTooltip text="Valor total investido em anúncios no Meta (Facebook e Instagram) no período." />
+                </span>
                 <DollarSign className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.gastos)}</p>
@@ -163,7 +167,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
             
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Leads
+                <span className="flex items-center gap-1.5">
+                  Leads
+                  <InfoTooltip text="Número de leads gerados através dos formulários e ações de conversão configuradas nas campanhas." />
+                </span>
                 <Users className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.leads}</p>
@@ -171,7 +178,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Custo por Lead
+                <span className="flex items-center gap-1.5">
+                  Custo por Lead
+                  <InfoTooltip text="Gasto total dividido pelo número de leads gerados (CPL)." />
+                </span>
                 <TrendingUp className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpl)}</p>
@@ -179,7 +189,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Cliques no Link
+                <span className="flex items-center gap-1.5">
+                  Cliques no Link
+                  <InfoTooltip text="Quantidade de cliques nos links dos anúncios." />
+                </span>
                 <Activity className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.cliques}</p>
@@ -187,7 +200,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Impressões
+                <span className="flex items-center gap-1.5">
+                  Impressões
+                  <InfoTooltip text="Número de vezes que os anúncios foram exibidos." />
+                </span>
                 <Eye className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.impressoes}</p>
@@ -195,7 +211,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Alcance
+                <span className="flex items-center gap-1.5">
+                  Alcance
+                  <InfoTooltip text="Número de pessoas únicas que viram os anúncios." />
+                </span>
                 <Radar className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.alcance}</p>
@@ -203,7 +222,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Frequência
+                <span className="flex items-center gap-1.5">
+                  Frequência
+                  <InfoTooltip text="Média de vezes que cada pessoa viu o anúncio (Impressões ÷ Alcance)." />
+                </span>
                 <Repeat className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.frequencia.toFixed(2)}</p>
@@ -211,7 +233,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                CTR
+                <span className="flex items-center gap-1.5">
+                  CTR
+                  <InfoTooltip text="Taxa de cliques: percentual de impressões que resultaram em clique." />
+                </span>
                 <Percent className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.ctr.toFixed(2)}%</p>
@@ -219,7 +244,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                CPM
+                <span className="flex items-center gap-1.5">
+                  CPM
+                  <InfoTooltip text="Custo por mil impressões." />
+                </span>
                 <DollarSign className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpm)}</p>

@@ -10,6 +10,7 @@ import {
   PiggyBank
 } from 'lucide-react';
 import Link from 'next/link';
+import InfoTooltip from '@/components/InfoTooltip';
 
 export const dynamic = 'force-dynamic';
 
@@ -138,7 +139,10 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Total de Oportunidades
+                <span className="flex items-center gap-1.5">
+                  Total de Oportunidades
+                  <InfoTooltip text="Número total de leads/negócios registrados no CRM no período." />
+                </span>
                 <Briefcase className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-4xl font-bold text-white mb-2">{dashboardData.oportunidades}</p>
@@ -147,7 +151,10 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative overflow-hidden group">
               <div className="absolute inset-0 bg-emerald-500/5 transition-colors group-hover:bg-emerald-500/10" />
               <h3 className="text-emerald-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
-                Vendas Ganhas
+                <span className="flex items-center gap-1.5">
+                  Vendas Ganhas
+                  <InfoTooltip text="Negócios marcados como ganhos (venda concluída) no período." />
+                </span>
                 <TrendingUp className="w-5 h-5 text-emerald-500/50" />
               </h3>
               <p className="text-4xl font-bold text-emerald-400 relative z-10">{dashboardData.ganhas}</p>
@@ -156,7 +163,10 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative overflow-hidden group">
               <div className="absolute inset-0 bg-red-500/5 transition-colors group-hover:bg-red-500/10" />
               <h3 className="text-red-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
-                Oportunidades Perdidas
+                <span className="flex items-center gap-1.5">
+                  Oportunidades Perdidas
+                  <InfoTooltip text="Negócios marcados como perdidos no período." />
+                </span>
                 <AlertCircle className="w-5 h-5 text-red-500/50" />
               </h3>
               <p className="text-4xl font-bold text-red-400 relative z-10">{dashboardData.perdidas}</p>
@@ -164,7 +174,10 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Valor Ganho
+                <span className="flex items-center gap-1.5">
+                  Valor Ganho
+                  <InfoTooltip text="Soma do valor de todos os negócios marcados como ganhos." />
+                </span>
                 <Wallet className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-4xl font-bold text-white mb-2">{formatCurrency(dashboardData.valorGanho)}</p>
@@ -172,7 +185,10 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Valor em Pipeline
+                <span className="flex items-center gap-1.5">
+                  Valor em Pipeline
+                  <InfoTooltip text="Soma do valor dos negócios ainda em andamento (nem ganhos, nem perdidos)." />
+                </span>
                 <PiggyBank className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-4xl font-bold text-white mb-2">{formatCurrency(dashboardData.valorPipeline)}</p>

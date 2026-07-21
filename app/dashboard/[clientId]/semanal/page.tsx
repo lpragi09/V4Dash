@@ -9,6 +9,7 @@ import {
   TrendingUp
 } from 'lucide-react';
 import TrendChart from '@/components/TrendChart';
+import InfoTooltip from '@/components/InfoTooltip';
 
 export const dynamic = 'force-dynamic';
 
@@ -229,7 +230,10 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 backdrop-blur-sm border border-[#27272a] rounded-2xl p-6 hover:border-red-900/50 transition-colors">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-zinc-400 font-medium">Receita 7d</h3>
+                <h3 className="text-zinc-400 font-medium flex items-center gap-1.5">
+                  Receita 7d
+                  <InfoTooltip text="Soma do valor dos negócios ganhos no Kommo nos últimos 7 dias." />
+                </h3>
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center">
                   <DollarSign className="w-5 h-5 text-emerald-500" />
                 </div>
@@ -241,7 +245,10 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 backdrop-blur-sm border border-[#27272a] rounded-2xl p-6 hover:border-red-900/50 transition-colors">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-zinc-400 font-medium">Investimento 7d</h3>
+                <h3 className="text-zinc-400 font-medium flex items-center gap-1.5">
+                  Investimento 7d
+                  <InfoTooltip text="Soma do gasto em Meta Ads e Google Ads nos últimos 7 dias." />
+                </h3>
                 <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center">
                   <Activity className="w-5 h-5 text-red-500" />
                 </div>
@@ -253,7 +260,10 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 backdrop-blur-sm border border-[#27272a] rounded-2xl p-6 hover:border-red-900/50 transition-colors">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-zinc-400 font-medium">Leads 7d</h3>
+                <h3 className="text-zinc-400 font-medium flex items-center gap-1.5">
+                  Leads 7d
+                  <InfoTooltip text="Total de leads/conversões gerados por Meta Ads e Google Ads somados nos últimos 7 dias." />
+                </h3>
                 <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
                   <Users className="w-5 h-5 text-blue-500" />
                 </div>
@@ -265,7 +275,10 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
 
             <div className="bg-[#18181b]/80 backdrop-blur-sm border border-[#27272a] rounded-2xl p-6 hover:border-red-900/50 transition-colors">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-zinc-400 font-medium">CPL 7d</h3>
+                <h3 className="text-zinc-400 font-medium flex items-center gap-1.5">
+                  CPL 7d
+                  <InfoTooltip text="Investimento total dividido pelo total de leads gerados nos últimos 7 dias." />
+                </h3>
                 <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center">
                   <TrendingUp className="w-5 h-5 text-purple-500" />
                 </div>

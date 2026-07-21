@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import TrendChart from '@/components/TrendChart';
+import InfoTooltip from '@/components/InfoTooltip';
 
 export const dynamic = 'force-dynamic';
 
@@ -161,7 +162,10 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Gastos (Google)
+                <span className="flex items-center gap-1.5">
+                  Gastos (Google)
+                  <InfoTooltip text="Valor total investido em campanhas do Google Ads no período." />
+                </span>
                 <DollarSign className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.gastos)}</p>
@@ -169,7 +173,10 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
             
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Leads (Google)
+                <span className="flex items-center gap-1.5">
+                  Leads (Google)
+                  <InfoTooltip text="Número de conversões registradas nas campanhas do Google Ads." />
+                </span>
                 <Users className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.leads}</p>
@@ -177,7 +184,10 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Custo por Lead
+                <span className="flex items-center gap-1.5">
+                  Custo por Lead
+                  <InfoTooltip text="Gasto total dividido pelo número de conversões geradas (CPL)." />
+                </span>
                 <TrendingUp className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpl)}</p>
@@ -185,7 +195,10 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Cliques
+                <span className="flex items-center gap-1.5">
+                  Cliques
+                  <InfoTooltip text="Quantidade de cliques nos anúncios do Google Ads." />
+                </span>
                 <Activity className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.cliques}</p>
@@ -193,7 +206,10 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                Impressões
+                <span className="flex items-center gap-1.5">
+                  Impressões
+                  <InfoTooltip text="Número de vezes que os anúncios foram exibidos." />
+                </span>
                 <Eye className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.impressoes}</p>
@@ -201,7 +217,10 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                CTR
+                <span className="flex items-center gap-1.5">
+                  CTR
+                  <InfoTooltip text="Taxa de cliques: percentual de impressões que resultaram em clique." />
+                </span>
                 <Percent className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.ctr.toFixed(2)}%</p>
@@ -209,7 +228,10 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
-                CPC Médio
+                <span className="flex items-center gap-1.5">
+                  CPC Médio
+                  <InfoTooltip text="Valor médio pago por clique." />
+                </span>
                 <DollarSign className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpcMedio)}</p>
