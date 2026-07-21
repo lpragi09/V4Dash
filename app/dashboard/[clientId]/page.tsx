@@ -1,6 +1,6 @@
 import { createClient } from '@/utils/supabase/server';
 import { notFound } from 'next/navigation';
-import { 
+import {
   TrendingUp,
   Users,
   DollarSign,
@@ -8,6 +8,7 @@ import {
   AlertCircle,
   LayoutDashboard
 } from 'lucide-react';
+import TrendChart from '@/components/TrendChart';
 
 // Force dynamic since it depends on params
 export const dynamic = 'force-dynamic';
@@ -15,6 +16,21 @@ export const dynamic = 'force-dynamic';
 interface KommoLead {
   status_id: number;
   price?: number;
+}
+
+function lastNDates(n: number): string[] {
+  const dates: string[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+function alignSeries(dates: string[], rows: { date: string; value: number }[]): { date: string; value: number }[] {
+  const map = new Map(rows.map((r) => [r.date, r.value]));
+  return dates.map((d) => ({ date: d, value: map.get(d) || 0 }));
 }
 
 export default async function ClientOverviewPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -51,6 +67,9 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   let metaData = { gastos: 0, leads: 0, cpl: 0 };
   let googleData = { gastos: 0, leads: 0, cpl: 0 };
   let crmData = { oportunidades: 0, ganhas: 0, perdidas: 0, valorGanho: 0 };
+  const dateRange = lastNDates(30);
+  let metaDailySpend: { date: string; value: number }[] = alignSeries(dateRange, []);
+  let googleDailySpend: { date: string; value: number }[] = alignSeries(dateRange, []);
 
   // Fetch Meta (Últimos 30 dias)
   if (metaInt?.access_token && metaInt?.conta_id) {
@@ -59,21 +78,30 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
       const url = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${metaInt.access_token}&date_preset=last_30d&fields=spend,actions`;
       const res = await fetch(url, { cache: 'no-store' });
       const json = await res.json();
-      
+
       const insights = json.data && json.data.length > 0 ? json.data[0] : null;
-      
+
       let leadsCount = 0;
       if (insights?.actions) {
-        const leadAction = insights.actions.find((a: any) => a.action_type === 'lead');
+        const leadAction = (insights.actions as { action_type: string; value: string }[]).find((a) => a.action_type === 'lead');
         if (leadAction) leadsCount = parseInt(leadAction.value);
       }
       const spend = insights ? parseFloat(insights.spend || '0') : 0;
-      
+
       metaData = {
         gastos: spend,
         leads: leadsCount,
         cpl: leadsCount > 0 ? spend / leadsCount : 0
       };
+
+      const dailyUrl = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${metaInt.access_token}&date_preset=last_30d&time_increment=1&fields=spend`;
+      const dailyRes = await fetch(dailyUrl, { cache: 'no-store' });
+      const dailyJson = await dailyRes.json();
+      const dailyRows: { date_start: string; spend?: string }[] = dailyJson.data || [];
+      metaDailySpend = alignSeries(
+        dateRange,
+        dailyRows.map((row) => ({ date: row.date_start, value: parseFloat(row.spend || '0') }))
+      );
     } catch(err) {
       console.error("Error fetching Meta Ads:", err);
     }
@@ -102,6 +130,19 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
       const spend = metrics ? Number(metrics.costMicros || 0) / 1_000_000 : 0;
       const leads = metrics ? Number(metrics.conversions || 0) : 0;
       googleData = { gastos: spend, leads, cpl: leads > 0 ? spend / leads : 0 };
+
+      const dailyQuery = `SELECT segments.date, metrics.cost_micros FROM customer WHERE segments.date DURING LAST_30_DAYS ORDER BY segments.date ASC`;
+      const dailyRes = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+        method: 'POST', headers, body: JSON.stringify({ query: dailyQuery }), cache: 'no-store',
+      });
+      const dailyBody = await dailyRes.json();
+      const dailyRows: { segments?: { date?: string }; metrics?: { costMicros?: string | number } }[] = dailyBody.results || [];
+      googleDailySpend = alignSeries(
+        dateRange,
+        dailyRows
+          .filter((row) => row.segments?.date)
+          .map((row) => ({ date: row.segments!.date!, value: Number(row.metrics?.costMicros || 0) / 1_000_000 }))
+      );
     } catch (err) {
       console.error("Error fetching Google Ads:", err);
     }
@@ -248,10 +289,24 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
         </div>
       )}
 
+      {/* Investment Trend */}
+      {dashboardData && (metaInt?.access_token || googleInt?.access_token) && (
+        <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8 relative z-10 mt-8">
+          <h2 className="text-xl font-bold text-white mb-6">Investimento Diário por Canal</h2>
+          <TrendChart
+            series={[
+              { name: 'Meta Ads', color: 'blue', points: metaDailySpend },
+              { name: 'Google Ads', color: 'emerald', points: googleDailySpend },
+            ]}
+            valueFormatter={formatCurrency}
+          />
+        </div>
+      )}
+
       {/* Breakdown Section */}
       {dashboardData && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 relative z-10 mt-8">
-          
+
           {/* Meta vs Google Panel */}
           <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
             <h2 className="text-xl font-bold text-white mb-6">Desempenho por Canal</h2>

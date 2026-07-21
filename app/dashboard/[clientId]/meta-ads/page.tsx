@@ -13,8 +13,15 @@ import {
   Percent
 } from 'lucide-react';
 import Link from 'next/link';
+import TrendChart from '@/components/TrendChart';
 
 export const dynamic = 'force-dynamic';
+
+interface MetaDailyInsight {
+  date_start: string;
+  spend?: string;
+  actions?: { action_type: string; value: string }[];
+}
 
 export default async function MetaAdsClientPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
@@ -41,6 +48,8 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
   let dashboardData = null;
   let fetchError = null;
+  let dailySpend: { date: string; value: number }[] = [];
+  let dailyLeads: { date: string; value: number }[] = [];
 
   if (!metaAccountId) {
     fetchError = "Conta de anúncios do Meta não vinculada a este cliente. Configure em Configurações Gerais.";
@@ -85,6 +94,21 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
         ctr: insights ? parseFloat(insights.ctr || '0') : 0,
         cpm: insights ? parseFloat(insights.cpm || '0') : 0,
       };
+
+      // Busca a série diária (últimos 30 dias) para os gráficos
+      const dailyUrl = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&time_increment=1&fields=spend,actions`;
+      const dailyRes = await fetch(dailyUrl, { cache: 'no-store' });
+      const dailyJson = await dailyRes.json();
+      const dailyRows: MetaDailyInsight[] = dailyJson.data || [];
+
+      dailySpend = dailyRows.map((row) => ({
+        date: row.date_start,
+        value: parseFloat(row.spend || '0'),
+      }));
+      dailyLeads = dailyRows.map((row) => {
+        const leadAction = row.actions?.find((a) => a.action_type === 'lead');
+        return { date: row.date_start, value: leadAction ? parseInt(leadAction.value, 10) : 0 };
+      });
 
     } catch (err) {
       dashboardData = null;
@@ -199,6 +223,20 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <DollarSign className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpm)}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-white font-bold mb-4">Gasto Diário</h3>
+              <TrendChart
+                series={[{ name: 'Gasto', color: 'blue', points: dailySpend }]}
+                valueFormatter={formatCurrency}
+              />
+            </div>
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-white font-bold mb-4">Leads Diários</h3>
+              <TrendChart series={[{ name: 'Leads', color: 'blue', points: dailyLeads }]} />
             </div>
           </div>
         </>

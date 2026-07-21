@@ -12,8 +12,14 @@ import {
   Percent
 } from 'lucide-react';
 import Link from 'next/link';
+import TrendChart from '@/components/TrendChart';
 
 export const dynamic = 'force-dynamic';
+
+interface GoogleDailyRow {
+  segments?: { date?: string };
+  metrics?: { costMicros?: string | number; clicks?: string | number };
+}
 
 export default async function GoogleAdsClientPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
@@ -41,11 +47,13 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
 
   let dashboardData = null;
   let fetchError = null;
+  let dailySpend: { date: string; value: number }[] = [];
+  let dailyClicks: { date: string; value: number }[] = [];
 
-  if (!googleAccountId) {
-    fetchError = "Conta do Google Ads não vinculada a este cliente. Configure em Configurações Gerais.";
-  } else if (!accessToken) {
-    fetchError = "Cliente não conectou o Google Ads (Access Token ausente).";
+  if (!accessToken) {
+    fetchError = "Google Ads não conectado para este cliente. Autorize em Configurações Gerais.";
+  } else if (!googleAccountId) {
+    fetchError = "Google Ads conectado, mas nenhuma conta de anúncios foi selecionada. Escolha uma conta em Configurações Gerais.";
   } else if (!developerToken) {
     fetchError = "Token de Desenvolvedor do Google Ads (GOOGLE_ADS_DEVELOPER_TOKEN) não configurado no servidor.";
   } else {
@@ -87,6 +95,27 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
         ctr: metrics ? Number(metrics.ctr || 0) * 100 : 0,
         cpcMedio: metrics ? Number(metrics.averageCpc || 0) / 1_000_000 : 0,
       };
+
+      // Busca a série diária (últimos 30 dias) para os gráficos
+      const dailyQuery = `SELECT segments.date, metrics.clicks, metrics.cost_micros FROM customer WHERE segments.date DURING LAST_30_DAYS ORDER BY segments.date ASC`;
+      const dailyRes = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ query: dailyQuery }),
+        cache: 'no-store',
+      });
+      const dailyBody = await dailyRes.json();
+      const dailyRows: GoogleDailyRow[] = dailyBody.results || [];
+
+      dailySpend = dailyRows
+        .filter((row) => row.segments?.date)
+        .map((row) => ({
+          date: row.segments!.date!,
+          value: Number(row.metrics?.costMicros || 0) / 1_000_000,
+        }));
+      dailyClicks = dailyRows
+        .filter((row) => row.segments?.date)
+        .map((row) => ({ date: row.segments!.date!, value: Number(row.metrics?.clicks || 0) }));
     } catch (err) {
       dashboardData = null;
       fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do Google Ads.";
@@ -184,6 +213,20 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
                 <DollarSign className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpcMedio)}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-white font-bold mb-4">Gasto Diário</h3>
+              <TrendChart
+                series={[{ name: 'Gasto', color: 'emerald', points: dailySpend }]}
+                valueFormatter={formatCurrency}
+              />
+            </div>
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-white font-bold mb-4">Cliques Diários</h3>
+              <TrendChart series={[{ name: 'Cliques', color: 'emerald', points: dailyClicks }]} />
             </div>
           </div>
         </>
