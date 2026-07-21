@@ -1,13 +1,15 @@
 import { createClient } from '@/utils/supabase/server';
 import { notFound } from 'next/navigation';
-import { 
+import {
   Search,
   Users,
   DollarSign,
   TrendingUp,
   AlertCircle,
   Activity,
-  Settings
+  Settings,
+  Eye,
+  Percent
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -48,17 +50,46 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
     fetchError = "Token de Desenvolvedor do Google Ads (GOOGLE_ADS_DEVELOPER_TOKEN) não configurado no servidor.";
   } else {
     try {
-      // TODO: Substituir por chamada real para a API do Google Ads.
-      // Exemplo de payload mockado para fins de design
-      dashboardData = {
-        gastos: 1543.20,
-        leads: 42,
-        cliques: 850,
-        cpl: 1543.20 / 42
+      const customerId = googleAccountId.replace(/-/g, '');
+      const query = `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.ctr, metrics.average_cpc FROM customer WHERE segments.date DURING LAST_30_DAYS`;
+
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${accessToken}`,
+        'developer-token': developerToken,
+        'Content-Type': 'application/json',
       };
-    } catch (err: any) {
+      if (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID) {
+        headers['login-customer-id'] = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace(/-/g, '');
+      }
+
+      const res = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ query }),
+        cache: 'no-store',
+      });
+      const body = await res.json();
+
+      if (!res.ok) {
+        throw new Error(body?.error?.message || `Erro na API do Google Ads (${res.status})`);
+      }
+
+      const metrics = body.results?.[0]?.metrics;
+      const spend = metrics ? Number(metrics.costMicros || 0) / 1_000_000 : 0;
+      const leads = metrics ? Number(metrics.conversions || 0) : 0;
+
+      dashboardData = {
+        gastos: spend,
+        leads,
+        cliques: metrics ? Number(metrics.clicks || 0) : 0,
+        cpl: leads > 0 ? spend / leads : 0,
+        impressoes: metrics ? Number(metrics.impressions || 0) : 0,
+        ctr: metrics ? Number(metrics.ctr || 0) * 100 : 0,
+        cpcMedio: metrics ? Number(metrics.averageCpc || 0) / 1_000_000 : 0,
+      };
+    } catch (err) {
       dashboardData = null;
-      fetchError = err.message || "Erro ao conectar com a API do Google Ads.";
+      fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do Google Ads.";
     }
   }
 
@@ -129,6 +160,30 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
                 <Activity className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.cliques}</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                Impressões
+                <Eye className="w-5 h-5 text-zinc-500" />
+              </h3>
+              <p className="text-3xl font-bold text-white mb-2">{dashboardData.impressoes}</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                CTR
+                <Percent className="w-5 h-5 text-zinc-500" />
+              </h3>
+              <p className="text-3xl font-bold text-white mb-2">{dashboardData.ctr.toFixed(2)}%</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                CPC Médio
+                <DollarSign className="w-5 h-5 text-zinc-500" />
+              </h3>
+              <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpcMedio)}</p>
             </div>
           </div>
         </>

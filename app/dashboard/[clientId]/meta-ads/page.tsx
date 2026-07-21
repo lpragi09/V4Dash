@@ -1,12 +1,16 @@
 import { createClient } from '@/utils/supabase/server';
 import { notFound } from 'next/navigation';
-import { 
+import {
   Activity,
   Users,
   DollarSign,
   TrendingUp,
   AlertCircle,
-  Settings
+  Settings,
+  Eye,
+  Radar,
+  Repeat,
+  Percent
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -46,10 +50,11 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
     try {
       // Faz a chamada real para a Graph API do Meta (Insights dos últimos 30 dias)
       const normalizedAccountId = metaAccountId.startsWith('act_') ? metaAccountId : `act_${metaAccountId}`;
-      const url = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&fields=spend,clicks,actions`;
+      const fields = 'spend,clicks,impressions,reach,frequency,ctr,cpm,actions';
+      const url = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&fields=${fields}`;
       const response = await fetch(url, { cache: 'no-store' });
       const responseData = await response.json();
-      
+
       if (responseData.error) {
         throw new Error(responseData.error.message || "Erro na Graph API do Meta");
       }
@@ -57,11 +62,11 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
       // Processa os dados
       // Se não houver dados no período, os valores serão 0
       const insights = responseData.data && responseData.data.length > 0 ? responseData.data[0] : null;
-      
+
       let leadsCount = 0;
       if (insights && insights.actions) {
         // 'lead' é o action_type padrão, mas dependendo da conversão pode ser outro
-        const leadAction = insights.actions.find((a: any) => a.action_type === 'lead');
+        const leadAction = (insights.actions as { action_type: string; value: string }[]).find((a) => a.action_type === 'lead');
         if (leadAction) leadsCount = parseInt(leadAction.value);
       }
 
@@ -73,12 +78,17 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
         gastos: spend,
         leads: leadsCount,
         cliques: clicks,
-        cpl: cpl
+        cpl: cpl,
+        impressoes: insights ? parseInt(insights.impressions || '0') : 0,
+        alcance: insights ? parseInt(insights.reach || '0') : 0,
+        frequencia: insights ? parseFloat(insights.frequency || '0') : 0,
+        ctr: insights ? parseFloat(insights.ctr || '0') : 0,
+        cpm: insights ? parseFloat(insights.cpm || '0') : 0,
       };
 
-    } catch (err: any) {
+    } catch (err) {
       dashboardData = null;
-      fetchError = err.message || "Erro ao conectar com a API do Meta Ads.";
+      fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do Meta Ads.";
     }
   }
 
@@ -149,6 +159,46 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <Activity className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.cliques}</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                Impressões
+                <Eye className="w-5 h-5 text-zinc-500" />
+              </h3>
+              <p className="text-3xl font-bold text-white mb-2">{dashboardData.impressoes}</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                Alcance
+                <Radar className="w-5 h-5 text-zinc-500" />
+              </h3>
+              <p className="text-3xl font-bold text-white mb-2">{dashboardData.alcance}</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                Frequência
+                <Repeat className="w-5 h-5 text-zinc-500" />
+              </h3>
+              <p className="text-3xl font-bold text-white mb-2">{dashboardData.frequencia.toFixed(2)}</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                CTR
+                <Percent className="w-5 h-5 text-zinc-500" />
+              </h3>
+              <p className="text-3xl font-bold text-white mb-2">{dashboardData.ctr.toFixed(2)}%</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                CPM
+                <DollarSign className="w-5 h-5 text-zinc-500" />
+              </h3>
+              <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpm)}</p>
             </div>
           </div>
         </>

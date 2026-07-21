@@ -12,6 +12,11 @@ import {
 // Force dynamic since it depends on params
 export const dynamic = 'force-dynamic';
 
+interface KommoLead {
+  status_id: number;
+  price?: number;
+}
+
 export default async function ClientOverviewPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
   const supabase = await createClient();
@@ -45,7 +50,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
 
   let metaData = { gastos: 0, leads: 0, cpl: 0 };
   let googleData = { gastos: 0, leads: 0, cpl: 0 };
-  let crmData = { oportunidades: 0, ganhas: 0, perdidas: 0 };
+  let crmData = { oportunidades: 0, ganhas: 0, perdidas: 0, valorGanho: 0 };
 
   // Fetch Meta (Últimos 30 dias)
   if (metaInt?.access_token && metaInt?.conta_id) {
@@ -74,21 +79,74 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
     }
   }
 
-  // Fetch Google (Mock até ter o token MCC oficial)
-  if (googleInt?.access_token && googleInt?.conta_id) {
-    googleData = { gastos: 1543.20, leads: 42, cpl: 1543.20 / 42 };
+  // Fetch Google Ads (Últimos 30 dias)
+  const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  if (googleInt?.access_token && googleInt?.conta_id && developerToken) {
+    try {
+      const customerId = googleInt.conta_id.replace(/-/g, '');
+      const query = `SELECT metrics.clicks, metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date DURING LAST_30_DAYS`;
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${googleInt.access_token}`,
+        'developer-token': developerToken,
+        'Content-Type': 'application/json',
+      };
+      if (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID) {
+        headers['login-customer-id'] = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace(/-/g, '');
+      }
+      const res = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+        method: 'POST', headers, body: JSON.stringify({ query }), cache: 'no-store',
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error?.message || `Erro na API do Google Ads (${res.status})`);
+      const metrics = body.results?.[0]?.metrics;
+      const spend = metrics ? Number(metrics.costMicros || 0) / 1_000_000 : 0;
+      const leads = metrics ? Number(metrics.conversions || 0) : 0;
+      googleData = { gastos: spend, leads, cpl: leads > 0 ? spend / leads : 0 };
+    } catch (err) {
+      console.error("Error fetching Google Ads:", err);
+    }
   }
 
-  // Fetch CRM (Mock)
-  if (crmInt?.access_token) {
-    crmData = { oportunidades: 120, ganhas: 45, perdidas: 12 };
+  // Fetch CRM (Kommo)
+  if (crmInt?.access_token && crmInt?.conta_id) {
+    try {
+      const STATUS_GANHO = 142;
+      const STATUS_PERDIDO = 143;
+      let oportunidades = 0, ganhas = 0, perdidas = 0, valorGanho = 0;
+      let page = 1;
+      const limit = 250;
+      while (page <= 20) {
+        const res = await fetch(`https://${crmInt.conta_id}/api/v4/leads?limit=${limit}&page=${page}`, {
+          headers: { Authorization: `Bearer ${crmInt.access_token}` },
+          cache: 'no-store',
+        });
+        if (res.status === 204) break;
+        if (!res.ok) throw new Error(`Erro ao buscar leads do Kommo (${res.status})`);
+        const json = await res.json();
+        const leads: KommoLead[] = json._embedded?.leads || [];
+        for (const lead of leads) {
+          oportunidades += 1;
+          if (lead.status_id === STATUS_GANHO) {
+            ganhas += 1;
+            valorGanho += lead.price || 0;
+          } else if (lead.status_id === STATUS_PERDIDO) {
+            perdidas += 1;
+          }
+        }
+        if (leads.length < limit) break;
+        page += 1;
+      }
+      crmData = { oportunidades, ganhas, perdidas, valorGanho };
+    } catch (err) {
+      console.error("Error fetching Kommo CRM:", err);
+    }
   }
 
   // Aggregate Data
   const totalGastos = metaData.gastos + googleData.gastos;
   const totalLeads = metaData.leads + googleData.leads;
   const cplGeral = totalLeads > 0 ? totalGastos / totalLeads : 0;
-  const receitaCRM = crmData.ganhas * 1500; // Ticket médio mockado
+  const receitaCRM = crmData.valorGanho;
 
   const dashboardData = {
     visao_geral: {

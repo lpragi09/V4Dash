@@ -1,15 +1,22 @@
 import { createClient } from '@/utils/supabase/server';
 import { notFound } from 'next/navigation';
-import { 
+import {
   MessageSquare,
   TrendingUp,
   AlertCircle,
   Briefcase,
-  Settings
+  Settings,
+  Wallet,
+  PiggyBank
 } from 'lucide-react';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
+
+interface KommoLead {
+  status_id: number;
+  price?: number;
+}
 
 export default async function CrmClientPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
@@ -42,19 +49,59 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
   } else if (!accessToken) {
     fetchError = "Token de Acesso do CRM não encontrado para este cliente.";
   } else {
+    const STATUS_GANHO = 142;
+    const STATUS_PERDIDO = 143;
+
     try {
-      // TODO: Substituir por chamada real para a API do Kommo CRM.
-      // Exemplo de payload mockado para fins de design
-      dashboardData = {
-        oportunidades: 120,
-        ganhas: 45,
-        perdidas: 12
-      };
-    } catch (err: any) {
+      let oportunidades = 0;
+      let ganhas = 0;
+      let perdidas = 0;
+      let valorGanho = 0;
+      let valorPipeline = 0;
+      let page = 1;
+      const limit = 250;
+
+      while (page <= 20) {
+        const res = await fetch(`https://${crmAccountId}/api/v4/leads?limit=${limit}&page=${page}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: 'no-store',
+        });
+
+        if (res.status === 204) break;
+
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}) as Record<string, string>);
+          throw new Error(errBody.title || errBody.hint || `Erro ao buscar leads do Kommo (${res.status})`);
+        }
+
+        const json = await res.json();
+        const leads: KommoLead[] = json._embedded?.leads || [];
+
+        for (const lead of leads) {
+          oportunidades += 1;
+          if (lead.status_id === STATUS_GANHO) {
+            ganhas += 1;
+            valorGanho += lead.price || 0;
+          } else if (lead.status_id === STATUS_PERDIDO) {
+            perdidas += 1;
+          } else {
+            valorPipeline += lead.price || 0;
+          }
+        }
+
+        if (leads.length < limit) break;
+        page += 1;
+      }
+
+      dashboardData = { oportunidades, ganhas, perdidas, valorGanho, valorPipeline };
+    } catch (err) {
       dashboardData = null;
-      fetchError = err.message || "Erro ao conectar com a API do CRM.";
+      fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do CRM.";
     }
   }
+
+  const formatCurrency = (value: number) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-500">
@@ -96,7 +143,7 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
               </h3>
               <p className="text-4xl font-bold text-white mb-2">{dashboardData.oportunidades}</p>
             </div>
-            
+
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative overflow-hidden group">
               <div className="absolute inset-0 bg-emerald-500/5 transition-colors group-hover:bg-emerald-500/10" />
               <h3 className="text-emerald-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
@@ -113,6 +160,22 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
                 <AlertCircle className="w-5 h-5 text-red-500/50" />
               </h3>
               <p className="text-4xl font-bold text-red-400 relative z-10">{dashboardData.perdidas}</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                Valor Ganho
+                <Wallet className="w-5 h-5 text-zinc-500" />
+              </h3>
+              <p className="text-4xl font-bold text-white mb-2">{formatCurrency(dashboardData.valorGanho)}</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                Valor em Pipeline
+                <PiggyBank className="w-5 h-5 text-zinc-500" />
+              </h3>
+              <p className="text-4xl font-bold text-white mb-2">{formatCurrency(dashboardData.valorPipeline)}</p>
             </div>
           </div>
         </>
