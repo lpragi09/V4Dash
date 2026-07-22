@@ -222,6 +222,23 @@ function SettingsContent() {
     }
   };
 
+  const handleDisconnect = async (plataforma: 'meta_ads' | 'google_ads' | 'crm') => {
+    if (!selectedClientId) return;
+    if (!confirm('Tem certeza que deseja desconectar essa plataforma? Você vai precisar autorizar de novo.')) return;
+
+    await supabase
+      .from('integracoes_clientes')
+      .delete()
+      .eq('cliente_id', selectedClientId)
+      .eq('plataforma', plataforma);
+
+    if (plataforma === 'meta_ads') { setMetaId(''); setMetaAccounts([]); }
+    if (plataforma === 'google_ads') { setGoogleId(''); setGoogleAccounts([]); }
+
+    await fetchClients(true);
+    router.refresh();
+  };
+
   const handleSaveConnections = async () => {
     if (!selectedClientId) return;
     setIsSavingConnections(true);
@@ -424,9 +441,18 @@ function SettingsContent() {
                       </a>
                     ) : (
                       <div className="w-full">
-                        <div className="flex items-center gap-2 mb-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                          <span className="text-xs font-semibold text-emerald-500">Autorizado</span>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                            <span className="text-xs font-semibold text-emerald-500">Autorizado</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDisconnect('meta_ads')}
+                            className="text-xs text-zinc-500 hover:text-red-500 transition-colors underline underline-offset-2"
+                          >
+                            Desconectar
+                          </button>
                         </div>
                         {loadingAccounts.meta ? (
                           <div className="flex items-center gap-2 text-zinc-400 text-sm py-2">
@@ -473,9 +499,18 @@ function SettingsContent() {
                       </a>
                     ) : (
                       <div className="w-full">
-                        <div className="flex items-center gap-2 mb-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                          <span className="text-xs font-semibold text-emerald-500">Autorizado</span>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                            <span className="text-xs font-semibold text-emerald-500">Autorizado</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDisconnect('google_ads')}
+                            className="text-xs text-zinc-500 hover:text-red-500 transition-colors underline underline-offset-2"
+                          >
+                            Desconectar
+                          </button>
                         </div>
                         {loadingAccounts.google ? (
                           <div className="flex items-center gap-2 text-zinc-400 text-sm py-2">
@@ -526,8 +561,15 @@ function SettingsContent() {
                         <div className="flex items-center gap-2">
                           <CheckCircle2 className="w-5 h-5 text-emerald-500" />
                           <span className="text-sm font-semibold text-white">CRM Conectado</span>
+                          <span className="text-xs text-zinc-500">({selectedClient.crm_account_id})</span>
                         </div>
-                        <span className="text-xs text-zinc-500">{selectedClient.crm_account_id}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleDisconnect('crm')}
+                          className="text-xs text-zinc-500 hover:text-red-500 transition-colors underline underline-offset-2"
+                        >
+                          Desconectar
+                        </button>
                       </div>
                     )}
                   </div>
