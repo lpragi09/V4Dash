@@ -28,9 +28,22 @@ export async function POST(request: Request) {
     
     const tokenData = await tokenResponse.json();
 
-    if (tokenData.status === 400 || tokenData.title === 'Error') {
-      console.error('Kommo token exchange error:', tokenData);
-      return NextResponse.json({ error: tokenData.detail || 'Falha ao trocar o código. Verifique se ele já não expirou (dura apenas 20 minutos).' }, { status: 400 });
+    if (!tokenResponse.ok || tokenData.status === 400 || tokenData.title === 'Error') {
+      console.error('Kommo token exchange error:', {
+        status: tokenResponse.status,
+        fullDomain,
+        redirectUriSent: redirectUri,
+        response: tokenData,
+      });
+      const detail = [tokenData.detail, tokenData.hint].filter(Boolean).join(' — ');
+      return NextResponse.json(
+        {
+          error:
+            detail ||
+            'Falha ao trocar o código. Verifique se ele já não expirou (dura apenas 20 minutos).',
+        },
+        { status: 400 }
+      );
     }
 
     const accessToken = tokenData.access_token;
