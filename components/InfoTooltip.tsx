@@ -26,7 +26,7 @@ export default function InfoTooltip({ text }: InfoTooltipProps) {
       {isOpen && (
         <span
           role="tooltip"
-          className="absolute z-20 bottom-full left-0 mb-2 w-56 rounded-lg border border-[#27272a] bg-[#09090b] px-3 py-2 text-xs font-normal normal-case text-zinc-300 shadow-xl"
+          className="absolute z-30 top-full left-0 mt-2 w-56 rounded-lg border border-[#27272a] bg-[#09090b] px-3 py-2 text-xs font-normal normal-case text-zinc-300 shadow-xl"
         >
           {text}
         </span>

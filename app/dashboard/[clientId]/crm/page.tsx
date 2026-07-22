@@ -11,12 +11,33 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import InfoTooltip from '@/components/InfoTooltip';
+import TrendChart from '@/components/TrendChart';
 
 export const dynamic = 'force-dynamic';
 
 interface KommoLead {
   status_id: number;
   price?: number;
+  created_at?: number;
+  closed_at?: number;
+}
+
+function lastNDates(n: number): string[] {
+  const dates: string[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+function alignSeries(dates: string[], counts: Map<string, number>): { date: string; value: number }[] {
+  return dates.map((d) => ({ date: d, value: counts.get(d) || 0 }));
+}
+
+function unixToDate(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 }
 
 export default async function CrmClientPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -44,6 +65,12 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
 
   let dashboardData = null;
   let fetchError = null;
+  const dateRange = lastNDates(30);
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - 30);
+  const cutoff = cutoffDate.getTime() / 1000;
+  const dailyLeadsCount = new Map<string, number>();
+  const dailyWonValue = new Map<string, number>();
 
   if (!crmAccountId) {
     fetchError = "Conta de CRM não vinculada a este cliente. Configure em Configurações Gerais.";
@@ -88,6 +115,16 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
           } else {
             valorPipeline += lead.price || 0;
           }
+
+          // Buckets diários (últimos 30 dias) para os gráficos
+          if (lead.created_at && lead.created_at >= cutoff) {
+            const day = unixToDate(lead.created_at);
+            dailyLeadsCount.set(day, (dailyLeadsCount.get(day) || 0) + 1);
+          }
+          if (lead.status_id === STATUS_GANHO && lead.closed_at && lead.closed_at >= cutoff) {
+            const day = unixToDate(lead.closed_at);
+            dailyWonValue.set(day, (dailyWonValue.get(day) || 0) + (lead.price || 0));
+          }
         }
 
         if (leads.length < limit) break;
@@ -100,6 +137,9 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
       fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do CRM.";
     }
   }
+
+  const dailyLeads = alignSeries(dateRange, dailyLeadsCount);
+  const dailyWon = alignSeries(dateRange, dailyWonValue);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
@@ -148,8 +188,8 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
               <p className="text-4xl font-bold text-white mb-2">{dashboardData.oportunidades}</p>
             </div>
 
-            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative overflow-hidden group">
-              <div className="absolute inset-0 bg-emerald-500/5 transition-colors group-hover:bg-emerald-500/10" />
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative group">
+              <div className="absolute inset-0 rounded-2xl bg-emerald-500/5 transition-colors group-hover:bg-emerald-500/10" />
               <h3 className="text-emerald-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
                 <span className="flex items-center gap-1.5">
                   Vendas Ganhas
@@ -160,8 +200,8 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
               <p className="text-4xl font-bold text-emerald-400 relative z-10">{dashboardData.ganhas}</p>
             </div>
 
-            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative overflow-hidden group">
-              <div className="absolute inset-0 bg-red-500/5 transition-colors group-hover:bg-red-500/10" />
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative group">
+              <div className="absolute inset-0 rounded-2xl bg-red-500/5 transition-colors group-hover:bg-red-500/10" />
               <h3 className="text-red-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
                 <span className="flex items-center gap-1.5">
                   Oportunidades Perdidas
@@ -192,6 +232,20 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
                 <PiggyBank className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-4xl font-bold text-white mb-2">{formatCurrency(dashboardData.valorPipeline)}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-white font-bold mb-4">Leads Criados por Dia</h3>
+              <TrendChart series={[{ name: 'Leads', color: 'orange', points: dailyLeads }]} />
+            </div>
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+              <h3 className="text-white font-bold mb-4">Valor Ganho por Dia</h3>
+              <TrendChart
+                series={[{ name: 'Valor Ganho', color: 'emerald', points: dailyWon }]}
+                format="currency"
+              />
             </div>
           </div>
         </>
