@@ -133,30 +133,41 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
     try {
       const normalizedAccountId = metaAccountId.startsWith('act_') ? metaAccountId : `act_${metaAccountId}`;
       const { current, previous } = getPeriods();
+      const dailyUrl = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&time_increment=1&fields=spend,actions`;
 
-      dashboardData = await fetchMetaAggregate(normalizedAccountId, accessToken, current);
+      // Período atual, período anterior e série diária são independentes —
+      // buscados em paralelo em vez de um esperar o outro terminar.
+      const [currentSettled, previousSettled, dailySettled] = await Promise.allSettled([
+        fetchMetaAggregate(normalizedAccountId, accessToken, current),
+        fetchMetaAggregate(normalizedAccountId, accessToken, previous),
+        fetch(dailyUrl, { cache: 'no-store' }).then((r) => r.json()),
+      ]);
 
-      try {
-        previousData = await fetchMetaAggregate(normalizedAccountId, accessToken, previous);
-      } catch (err) {
-        console.error('Error fetching previous period Meta Ads:', err);
+      if (currentSettled.status === 'fulfilled') {
+        dashboardData = currentSettled.value;
+      } else {
+        throw currentSettled.reason;
       }
 
-      // Busca a série diária (últimos 30 dias) para os gráficos
-      const dailyUrl = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&time_increment=1&fields=spend,actions`;
-      const dailyRes = await fetch(dailyUrl, { cache: 'no-store' });
-      const dailyJson = await dailyRes.json();
-      const dailyRows: MetaDailyInsight[] = dailyJson.data || [];
+      if (previousSettled.status === 'fulfilled') {
+        previousData = previousSettled.value;
+      } else {
+        console.error('Error fetching previous period Meta Ads:', previousSettled.reason);
+      }
 
-      dailySpend = dailyRows.map((row) => ({
-        date: row.date_start,
-        value: parseFloat(row.spend || '0'),
-      }));
-      dailyLeads = dailyRows.map((row) => {
-        const leadAction = row.actions?.find((a) => a.action_type === 'lead');
-        return { date: row.date_start, value: leadAction ? parseInt(leadAction.value, 10) : 0 };
-      });
-
+      if (dailySettled.status === 'fulfilled') {
+        const dailyRows: MetaDailyInsight[] = dailySettled.value.data || [];
+        dailySpend = dailyRows.map((row) => ({
+          date: row.date_start,
+          value: parseFloat(row.spend || '0'),
+        }));
+        dailyLeads = dailyRows.map((row) => {
+          const leadAction = row.actions?.find((a) => a.action_type === 'lead');
+          return { date: row.date_start, value: leadAction ? parseInt(leadAction.value, 10) : 0 };
+        });
+      } else {
+        console.error('Error fetching daily Meta Ads series:', dailySettled.reason);
+      }
     } catch (err) {
       dashboardData = null;
       fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do Meta Ads.";

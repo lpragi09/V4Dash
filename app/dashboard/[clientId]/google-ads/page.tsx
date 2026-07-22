@@ -137,35 +137,47 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
       }
 
       const { current, previous } = getPeriods();
+      const dailyQuery = `SELECT segments.date, metrics.clicks, metrics.cost_micros FROM customer WHERE segments.date BETWEEN '${current.since}' AND '${current.until}' ORDER BY segments.date ASC`;
 
-      dashboardData = await fetchGoogleAggregate(customerId, headers, current);
+      // Período atual, período anterior e série diária são independentes —
+      // buscados em paralelo em vez de um esperar o outro terminar.
+      const [currentSettled, previousSettled, dailySettled] = await Promise.allSettled([
+        fetchGoogleAggregate(customerId, headers, current),
+        fetchGoogleAggregate(customerId, headers, previous),
+        fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ query: dailyQuery }),
+          cache: 'no-store',
+        }).then((r) => r.json()),
+      ]);
 
-      try {
-        previousData = await fetchGoogleAggregate(customerId, headers, previous);
-      } catch (err) {
-        console.error('Error fetching previous period Google Ads:', err);
+      if (currentSettled.status === 'fulfilled') {
+        dashboardData = currentSettled.value;
+      } else {
+        throw currentSettled.reason;
       }
 
-      // Busca a série diária (últimos 30 dias) para os gráficos
-      const dailyQuery = `SELECT segments.date, metrics.clicks, metrics.cost_micros FROM customer WHERE segments.date BETWEEN '${current.since}' AND '${current.until}' ORDER BY segments.date ASC`;
-      const dailyRes = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ query: dailyQuery }),
-        cache: 'no-store',
-      });
-      const dailyBody = await dailyRes.json();
-      const dailyRows: GoogleDailyRow[] = dailyBody.results || [];
+      if (previousSettled.status === 'fulfilled') {
+        previousData = previousSettled.value;
+      } else {
+        console.error('Error fetching previous period Google Ads:', previousSettled.reason);
+      }
 
-      dailySpend = dailyRows
-        .filter((row) => row.segments?.date)
-        .map((row) => ({
-          date: row.segments!.date!,
-          value: Number(row.metrics?.costMicros || 0) / 1_000_000,
-        }));
-      dailyClicks = dailyRows
-        .filter((row) => row.segments?.date)
-        .map((row) => ({ date: row.segments!.date!, value: Number(row.metrics?.clicks || 0) }));
+      if (dailySettled.status === 'fulfilled') {
+        const dailyRows: GoogleDailyRow[] = dailySettled.value.results || [];
+        dailySpend = dailyRows
+          .filter((row) => row.segments?.date)
+          .map((row) => ({
+            date: row.segments!.date!,
+            value: Number(row.metrics?.costMicros || 0) / 1_000_000,
+          }));
+        dailyClicks = dailyRows
+          .filter((row) => row.segments?.date)
+          .map((row) => ({ date: row.segments!.date!, value: Number(row.metrics?.clicks || 0) }));
+      } else {
+        console.error('Error fetching daily Google Ads series:', dailySettled.reason);
+      }
     } catch (err) {
       dashboardData = null;
       fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do Google Ads.";

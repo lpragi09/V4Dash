@@ -18,6 +18,19 @@ interface KommoLead {
   price?: number;
 }
 
+interface ChannelAggregate {
+  gastos: number;
+  leads: number;
+  cpl: number;
+}
+
+interface CrmAggregate {
+  oportunidades: number;
+  ganhas: number;
+  perdidas: number;
+  valorGanho: number;
+}
+
 function lastNDates(n: number): string[] {
   const dates: string[] = [];
   for (let i = n - 1; i >= 0; i--) {
@@ -31,6 +44,145 @@ function lastNDates(n: number): string[] {
 function alignSeries(dates: string[], rows: { date: string; value: number }[]): { date: string; value: number }[] {
   const map = new Map(rows.map((r) => [r.date, r.value]));
   return dates.map((d) => ({ date: d, value: map.get(d) || 0 }));
+}
+
+async function fetchMeta(
+  accessToken: string,
+  contaId: string,
+  dateRange: string[]
+): Promise<{ current: ChannelAggregate; daily: { date: string; value: number }[] }> {
+  const normalizedAccountId = contaId.startsWith('act_') ? contaId : `act_${contaId}`;
+
+  const [currentJson, dailyJson] = await Promise.all([
+    fetch(
+      `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_7d&fields=spend,actions`,
+      { cache: 'no-store' }
+    ).then((r) => r.json()),
+    fetch(
+      `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_7d&time_increment=1&fields=spend`,
+      { cache: 'no-store' }
+    ).then((r) => r.json()),
+  ]);
+
+  const insights = currentJson.data && currentJson.data.length > 0 ? currentJson.data[0] : null;
+  let leadsCount = 0;
+  if (insights?.actions) {
+    const leadAction = (insights.actions as { action_type: string; value: string }[]).find((a) => a.action_type === 'lead');
+    if (leadAction) leadsCount = parseInt(leadAction.value);
+  }
+  const spend = insights ? parseFloat(insights.spend || '0') : 0;
+
+  const dailyRows: { date_start: string; spend?: string }[] = dailyJson.data || [];
+  const daily = alignSeries(
+    dateRange,
+    dailyRows.map((row) => ({ date: row.date_start, value: parseFloat(row.spend || '0') }))
+  );
+
+  return { current: { gastos: spend, leads: leadsCount, cpl: leadsCount > 0 ? spend / leadsCount : 0 }, daily };
+}
+
+async function fetchGoogle(
+  accessToken: string,
+  contaId: string,
+  developerToken: string,
+  dateRange: string[]
+): Promise<{ current: ChannelAggregate; daily: { date: string; value: number }[] }> {
+  const customerId = contaId.replace(/-/g, '');
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    'developer-token': developerToken,
+    'Content-Type': 'application/json',
+  };
+  if (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID) {
+    headers['login-customer-id'] = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace(/-/g, '');
+  }
+
+  const search = (query: string) =>
+    fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ query }),
+      cache: 'no-store',
+    }).then((r) => r.json());
+
+  const [currentBody, dailyBody] = await Promise.all([
+    search(`SELECT metrics.clicks, metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date DURING LAST_7_DAYS`),
+    search(`SELECT segments.date, metrics.cost_micros FROM customer WHERE segments.date DURING LAST_7_DAYS ORDER BY segments.date ASC`),
+  ]);
+
+  const metrics = currentBody.results?.[0]?.metrics;
+  const spend = metrics ? Number(metrics.costMicros || 0) / 1_000_000 : 0;
+  const leads = metrics ? Number(metrics.conversions || 0) : 0;
+
+  const dailyRows: { segments?: { date?: string }; metrics?: { costMicros?: string | number } }[] = dailyBody.results || [];
+  const daily = alignSeries(
+    dateRange,
+    dailyRows
+      .filter((row) => row.segments?.date)
+      .map((row) => ({ date: row.segments!.date!, value: Number(row.metrics?.costMicros || 0) / 1_000_000 }))
+  );
+
+  return { current: { gastos: spend, leads, cpl: leads > 0 ? spend / leads : 0 }, daily };
+}
+
+/**
+ * Busca todos os leads paginando em lotes paralelos (em vez de um por vez em
+ * sequência) — contas com milhares de leads levavam dezenas de segundos
+ * fazendo uma requisição de cada vez e esperando a resposta antes da próxima.
+ */
+async function fetchAllKommoLeads(domain: string, accessToken: string): Promise<KommoLead[]> {
+  const limit = 250;
+  const batchSize = 5;
+  const maxPages = 20;
+  const allLeads: KommoLead[] = [];
+  let page = 1;
+
+  while (page <= maxPages) {
+    const pagesInBatch = Array.from({ length: batchSize }, (_, i) => page + i).filter((p) => p <= maxPages);
+
+    const results = await Promise.all(
+      pagesInBatch.map(async (p) => {
+        const res = await fetch(`https://${domain}/api/v4/leads?limit=${limit}&page=${p}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: 'no-store',
+        });
+        if (res.status === 204) return [] as KommoLead[];
+        if (!res.ok) throw new Error(`Erro ao buscar leads do Kommo (${res.status})`);
+        const json = await res.json();
+        return (json._embedded?.leads || []) as KommoLead[];
+      })
+    );
+
+    let hitEnd = false;
+    for (const leads of results) {
+      allLeads.push(...leads);
+      if (leads.length < limit) hitEnd = true;
+    }
+
+    page += batchSize;
+    if (hitEnd) break;
+  }
+
+  return allLeads;
+}
+
+async function fetchCrm(accessToken: string, contaId: string): Promise<CrmAggregate> {
+  const STATUS_GANHO = 142;
+  const STATUS_PERDIDO = 143;
+  const leads = await fetchAllKommoLeads(contaId, accessToken);
+
+  let oportunidades = 0, ganhas = 0, perdidas = 0, valorGanho = 0;
+  for (const lead of leads) {
+    oportunidades += 1;
+    if (lead.status_id === STATUS_GANHO) {
+      ganhas += 1;
+      valorGanho += lead.price || 0;
+    } else if (lead.status_id === STATUS_PERDIDO) {
+      perdidas += 1;
+    }
+  }
+
+  return { oportunidades, ganhas, perdidas, valorGanho };
 }
 
 export default async function SemanalClientPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -57,124 +209,34 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
   const googleInt = integrations?.find(i => i.plataforma === 'google_ads');
   const crmInt = integrations?.find(i => i.plataforma === 'crm');
 
-  let metaData = { gastos: 0, leads: 0, cpl: 0 };
-  let googleData = { gastos: 0, leads: 0, cpl: 0 };
-  let crmData = { oportunidades: 0, ganhas: 0, perdidas: 0, valorGanho: 0 };
   const dateRange = lastNDates(7);
-  let metaDailySpend: { date: string; value: number }[] = alignSeries(dateRange, []);
-  let googleDailySpend: { date: string; value: number }[] = alignSeries(dateRange, []);
-
-  // Fetch Meta (Últimos 7 dias)
-  if (metaInt?.access_token && metaInt?.conta_id) {
-    try {
-      const normalizedAccountId = metaInt.conta_id.startsWith('act_') ? metaInt.conta_id : `act_${metaInt.conta_id}`;
-      const url = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${metaInt.access_token}&date_preset=last_7d&fields=spend,actions`;
-      const res = await fetch(url, { cache: 'no-store' });
-      const json = await res.json();
-      
-      const insights = json.data && json.data.length > 0 ? json.data[0] : null;
-      
-      let leadsCount = 0;
-      if (insights?.actions) {
-        const leadAction = (insights.actions as { action_type: string; value: string }[]).find((a) => a.action_type === 'lead');
-        if (leadAction) leadsCount = parseInt(leadAction.value);
-      }
-      const spend = insights ? parseFloat(insights.spend || '0') : 0;
-      
-      metaData = {
-        gastos: spend,
-        leads: leadsCount,
-        cpl: leadsCount > 0 ? spend / leadsCount : 0
-      };
-
-      const dailyUrl = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${metaInt.access_token}&date_preset=last_7d&time_increment=1&fields=spend`;
-      const dailyRes = await fetch(dailyUrl, { cache: 'no-store' });
-      const dailyJson = await dailyRes.json();
-      const dailyRows: { date_start: string; spend?: string }[] = dailyJson.data || [];
-      metaDailySpend = alignSeries(
-        dateRange,
-        dailyRows.map((row) => ({ date: row.date_start, value: parseFloat(row.spend || '0') }))
-      );
-    } catch(err) {
-      console.error("Error fetching Meta Ads:", err);
-    }
-  }
-
-  // Fetch Google Ads (Últimos 7 dias)
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-  if (googleInt?.access_token && googleInt?.conta_id && developerToken) {
-    try {
-      const customerId = googleInt.conta_id.replace(/-/g, '');
-      const query = `SELECT metrics.clicks, metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date DURING LAST_7_DAYS`;
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${googleInt.access_token}`,
-        'developer-token': developerToken,
-        'Content-Type': 'application/json',
-      };
-      if (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID) {
-        headers['login-customer-id'] = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace(/-/g, '');
-      }
-      const res = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
-        method: 'POST', headers, body: JSON.stringify({ query }), cache: 'no-store',
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error?.message || `Erro na API do Google Ads (${res.status})`);
-      const metrics = body.results?.[0]?.metrics;
-      const spend = metrics ? Number(metrics.costMicros || 0) / 1_000_000 : 0;
-      const leads = metrics ? Number(metrics.conversions || 0) : 0;
-      googleData = { gastos: spend, leads, cpl: leads > 0 ? spend / leads : 0 };
 
-      const dailyQuery = `SELECT segments.date, metrics.cost_micros FROM customer WHERE segments.date DURING LAST_7_DAYS ORDER BY segments.date ASC`;
-      const dailyRes = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
-        method: 'POST', headers, body: JSON.stringify({ query: dailyQuery }), cache: 'no-store',
-      });
-      const dailyBody = await dailyRes.json();
-      const dailyRows: { segments?: { date?: string }; metrics?: { costMicros?: string | number } }[] = dailyBody.results || [];
-      googleDailySpend = alignSeries(
-        dateRange,
-        dailyRows
-          .filter((row) => row.segments?.date)
-          .map((row) => ({ date: row.segments!.date!, value: Number(row.metrics?.costMicros || 0) / 1_000_000 }))
-      );
-    } catch (err) {
-      console.error("Error fetching Google Ads:", err);
-    }
-  }
+  // Meta, Google e CRM são independentes entre si — buscados em paralelo,
+  // não um esperando o outro terminar.
+  const [metaResult, googleResult, crmResult] = await Promise.allSettled([
+    metaInt?.access_token && metaInt?.conta_id
+      ? fetchMeta(metaInt.access_token, metaInt.conta_id, dateRange)
+      : Promise.reject(new Error('Meta Ads não configurado')),
+    googleInt?.access_token && googleInt?.conta_id && developerToken
+      ? fetchGoogle(googleInt.access_token, googleInt.conta_id, developerToken, dateRange)
+      : Promise.reject(new Error('Google Ads não configurado')),
+    crmInt?.access_token && crmInt?.conta_id
+      ? fetchCrm(crmInt.access_token, crmInt.conta_id)
+      : Promise.reject(new Error('CRM não configurado')),
+  ]);
 
-  // Fetch CRM (Kommo)
-  if (crmInt?.access_token && crmInt?.conta_id) {
-    try {
-      const STATUS_GANHO = 142;
-      const STATUS_PERDIDO = 143;
-      let oportunidades = 0, ganhas = 0, perdidas = 0, valorGanho = 0;
-      let page = 1;
-      const limit = 250;
-      while (page <= 20) {
-        const res = await fetch(`https://${crmInt.conta_id}/api/v4/leads?limit=${limit}&page=${page}`, {
-          headers: { Authorization: `Bearer ${crmInt.access_token}` },
-          cache: 'no-store',
-        });
-        if (res.status === 204) break;
-        if (!res.ok) throw new Error(`Erro ao buscar leads do Kommo (${res.status})`);
-        const json = await res.json();
-        const leads: KommoLead[] = json._embedded?.leads || [];
-        for (const lead of leads) {
-          oportunidades += 1;
-          if (lead.status_id === STATUS_GANHO) {
-            ganhas += 1;
-            valorGanho += lead.price || 0;
-          } else if (lead.status_id === STATUS_PERDIDO) {
-            perdidas += 1;
-          }
-        }
-        if (leads.length < limit) break;
-        page += 1;
-      }
-      crmData = { oportunidades, ganhas, perdidas, valorGanho };
-    } catch (err) {
-      console.error("Error fetching Kommo CRM:", err);
-    }
-  }
+  if (metaResult.status === 'rejected') console.error('Error fetching Meta Ads:', metaResult.reason);
+  if (googleResult.status === 'rejected') console.error('Error fetching Google Ads:', googleResult.reason);
+  if (crmResult.status === 'rejected') console.error('Error fetching Kommo CRM:', crmResult.reason);
+
+  const metaData: ChannelAggregate = metaResult.status === 'fulfilled' ? metaResult.value.current : { gastos: 0, leads: 0, cpl: 0 };
+  const metaDailySpend = metaResult.status === 'fulfilled' ? metaResult.value.daily : alignSeries(dateRange, []);
+
+  const googleData: ChannelAggregate = googleResult.status === 'fulfilled' ? googleResult.value.current : { gastos: 0, leads: 0, cpl: 0 };
+  const googleDailySpend = googleResult.status === 'fulfilled' ? googleResult.value.daily : alignSeries(dateRange, []);
+
+  const crmData: CrmAggregate = crmResult.status === 'fulfilled' ? crmResult.value : { oportunidades: 0, ganhas: 0, perdidas: 0, valorGanho: 0 };
 
   // Aggregate Data
   const totalGastos = metaData.gastos + googleData.gastos;

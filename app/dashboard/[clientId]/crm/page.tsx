@@ -40,6 +40,50 @@ function unixToDate(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 }
 
+/**
+ * Busca todos os leads paginando em lotes paralelos (em vez de um por vez em
+ * sequência) — contas com milhares de leads levavam dezenas de segundos
+ * fazendo uma requisição de cada vez e esperando a resposta antes da próxima.
+ */
+async function fetchAllKommoLeads(domain: string, accessToken: string): Promise<KommoLead[]> {
+  const limit = 250;
+  const batchSize = 5;
+  const maxPages = 20;
+  const allLeads: KommoLead[] = [];
+  let page = 1;
+
+  while (page <= maxPages) {
+    const pagesInBatch = Array.from({ length: batchSize }, (_, i) => page + i).filter((p) => p <= maxPages);
+
+    const results = await Promise.all(
+      pagesInBatch.map(async (p) => {
+        const res = await fetch(`https://${domain}/api/v4/leads?limit=${limit}&page=${p}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: 'no-store',
+        });
+        if (res.status === 204) return [] as KommoLead[];
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}) as Record<string, string>);
+          throw new Error(errBody.title || errBody.hint || `Erro ao buscar leads do Kommo (${res.status})`);
+        }
+        const json = await res.json();
+        return (json._embedded?.leads || []) as KommoLead[];
+      })
+    );
+
+    let hitEnd = false;
+    for (const leads of results) {
+      allLeads.push(...leads);
+      if (leads.length < limit) hitEnd = true;
+    }
+
+    page += batchSize;
+    if (hitEnd) break;
+  }
+
+  return allLeads;
+}
+
 export default async function CrmClientPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
   const supabase = await createClient();
@@ -86,49 +130,29 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
       let perdidas = 0;
       let valorGanho = 0;
       let valorPipeline = 0;
-      let page = 1;
-      const limit = 250;
 
-      while (page <= 20) {
-        const res = await fetch(`https://${crmAccountId}/api/v4/leads?limit=${limit}&page=${page}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          cache: 'no-store',
-        });
+      const leads = await fetchAllKommoLeads(crmAccountId, accessToken);
 
-        if (res.status === 204) break;
-
-        if (!res.ok) {
-          const errBody = await res.json().catch(() => ({}) as Record<string, string>);
-          throw new Error(errBody.title || errBody.hint || `Erro ao buscar leads do Kommo (${res.status})`);
+      for (const lead of leads) {
+        oportunidades += 1;
+        if (lead.status_id === STATUS_GANHO) {
+          ganhas += 1;
+          valorGanho += lead.price || 0;
+        } else if (lead.status_id === STATUS_PERDIDO) {
+          perdidas += 1;
+        } else {
+          valorPipeline += lead.price || 0;
         }
 
-        const json = await res.json();
-        const leads: KommoLead[] = json._embedded?.leads || [];
-
-        for (const lead of leads) {
-          oportunidades += 1;
-          if (lead.status_id === STATUS_GANHO) {
-            ganhas += 1;
-            valorGanho += lead.price || 0;
-          } else if (lead.status_id === STATUS_PERDIDO) {
-            perdidas += 1;
-          } else {
-            valorPipeline += lead.price || 0;
-          }
-
-          // Buckets diários (últimos 30 dias) para os gráficos
-          if (lead.created_at && lead.created_at >= cutoff) {
-            const day = unixToDate(lead.created_at);
-            dailyLeadsCount.set(day, (dailyLeadsCount.get(day) || 0) + 1);
-          }
-          if (lead.status_id === STATUS_GANHO && lead.closed_at && lead.closed_at >= cutoff) {
-            const day = unixToDate(lead.closed_at);
-            dailyWonValue.set(day, (dailyWonValue.get(day) || 0) + (lead.price || 0));
-          }
+        // Buckets diários (últimos 30 dias) para os gráficos
+        if (lead.created_at && lead.created_at >= cutoff) {
+          const day = unixToDate(lead.created_at);
+          dailyLeadsCount.set(day, (dailyLeadsCount.get(day) || 0) + 1);
         }
-
-        if (leads.length < limit) break;
-        page += 1;
+        if (lead.status_id === STATUS_GANHO && lead.closed_at && lead.closed_at >= cutoff) {
+          const day = unixToDate(lead.closed_at);
+          dailyWonValue.set(day, (dailyWonValue.get(day) || 0) + (lead.price || 0));
+        }
       }
 
       dashboardData = { oportunidades, ganhas, perdidas, valorGanho, valorPipeline };
