@@ -14,12 +14,78 @@ import {
 import Link from 'next/link';
 import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
+import ComparisonBadge from '@/components/ComparisonBadge';
 
 export const dynamic = 'force-dynamic';
 
 interface GoogleDailyRow {
   segments?: { date?: string };
   metrics?: { costMicros?: string | number; clicks?: string | number };
+}
+
+interface GoogleAggregate {
+  gastos: number;
+  leads: number;
+  cliques: number;
+  cpl: number;
+  impressoes: number;
+  ctr: number;
+  cpcMedio: number;
+}
+
+function fmtDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** Janela dos últimos 30 dias (incluindo hoje) e os 30 dias imediatamente anteriores. */
+function getPeriods() {
+  const currentUntil = new Date();
+  const currentSince = new Date();
+  currentSince.setDate(currentSince.getDate() - 29);
+
+  const previousUntil = new Date();
+  previousUntil.setDate(previousUntil.getDate() - 30);
+  const previousSince = new Date();
+  previousSince.setDate(previousSince.getDate() - 59);
+
+  return {
+    current: { since: fmtDate(currentSince), until: fmtDate(currentUntil) },
+    previous: { since: fmtDate(previousSince), until: fmtDate(previousUntil) },
+  };
+}
+
+async function fetchGoogleAggregate(
+  customerId: string,
+  headers: Record<string, string>,
+  range: { since: string; until: string }
+): Promise<GoogleAggregate> {
+  const query = `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.ctr, metrics.average_cpc FROM customer WHERE segments.date BETWEEN '${range.since}' AND '${range.until}'`;
+
+  const res = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ query }),
+    cache: 'no-store',
+  });
+  const body = await res.json();
+
+  if (!res.ok) {
+    throw new Error(body?.error?.message || `Erro na API do Google Ads (${res.status})`);
+  }
+
+  const metrics = body.results?.[0]?.metrics;
+  const spend = metrics ? Number(metrics.costMicros || 0) / 1_000_000 : 0;
+  const leads = metrics ? Number(metrics.conversions || 0) : 0;
+
+  return {
+    gastos: spend,
+    leads,
+    cliques: metrics ? Number(metrics.clicks || 0) : 0,
+    cpl: leads > 0 ? spend / leads : 0,
+    impressoes: metrics ? Number(metrics.impressions || 0) : 0,
+    ctr: metrics ? Number(metrics.ctr || 0) * 100 : 0,
+    cpcMedio: metrics ? Number(metrics.averageCpc || 0) / 1_000_000 : 0,
+  };
 }
 
 export default async function GoogleAdsClientPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -46,7 +112,8 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
   const accessToken = googleInt?.access_token;
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 
-  let dashboardData = null;
+  let dashboardData: GoogleAggregate | null = null;
+  let previousData: GoogleAggregate | null = null;
   let fetchError = null;
   let dailySpend: { date: string; value: number }[] = [];
   let dailyClicks: { date: string; value: number }[] = [];
@@ -60,8 +127,6 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
   } else {
     try {
       const customerId = googleAccountId.replace(/-/g, '');
-      const query = `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.ctr, metrics.average_cpc FROM customer WHERE segments.date DURING LAST_30_DAYS`;
-
       const headers: Record<string, string> = {
         Authorization: `Bearer ${accessToken}`,
         'developer-token': developerToken,
@@ -71,34 +136,18 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
         headers['login-customer-id'] = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace(/-/g, '');
       }
 
-      const res = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ query }),
-        cache: 'no-store',
-      });
-      const body = await res.json();
+      const { current, previous } = getPeriods();
 
-      if (!res.ok) {
-        throw new Error(body?.error?.message || `Erro na API do Google Ads (${res.status})`);
+      dashboardData = await fetchGoogleAggregate(customerId, headers, current);
+
+      try {
+        previousData = await fetchGoogleAggregate(customerId, headers, previous);
+      } catch (err) {
+        console.error('Error fetching previous period Google Ads:', err);
       }
 
-      const metrics = body.results?.[0]?.metrics;
-      const spend = metrics ? Number(metrics.costMicros || 0) / 1_000_000 : 0;
-      const leads = metrics ? Number(metrics.conversions || 0) : 0;
-
-      dashboardData = {
-        gastos: spend,
-        leads,
-        cliques: metrics ? Number(metrics.clicks || 0) : 0,
-        cpl: leads > 0 ? spend / leads : 0,
-        impressoes: metrics ? Number(metrics.impressions || 0) : 0,
-        ctr: metrics ? Number(metrics.ctr || 0) * 100 : 0,
-        cpcMedio: metrics ? Number(metrics.averageCpc || 0) / 1_000_000 : 0,
-      };
-
       // Busca a série diária (últimos 30 dias) para os gráficos
-      const dailyQuery = `SELECT segments.date, metrics.clicks, metrics.cost_micros FROM customer WHERE segments.date DURING LAST_30_DAYS ORDER BY segments.date ASC`;
+      const dailyQuery = `SELECT segments.date, metrics.clicks, metrics.cost_micros FROM customer WHERE segments.date BETWEEN '${current.since}' AND '${current.until}' ORDER BY segments.date ASC`;
       const dailyRes = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
         method: 'POST',
         headers,
@@ -169,8 +218,9 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
                 <DollarSign className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.gastos)}</p>
+              {previousData && <ComparisonBadge current={dashboardData.gastos} previous={previousData.gastos} invert />}
             </div>
-            
+
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
@@ -180,6 +230,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
                 <Users className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.leads}</p>
+              {previousData && <ComparisonBadge current={dashboardData.leads} previous={previousData.leads} />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -191,6 +242,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
                 <TrendingUp className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpl)}</p>
+              {previousData && <ComparisonBadge current={dashboardData.cpl} previous={previousData.cpl} invert />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -202,6 +254,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
                 <Activity className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.cliques}</p>
+              {previousData && <ComparisonBadge current={dashboardData.cliques} previous={previousData.cliques} />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -213,6 +266,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
                 <Eye className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.impressoes}</p>
+              {previousData && <ComparisonBadge current={dashboardData.impressoes} previous={previousData.impressoes} />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -224,6 +278,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
                 <Percent className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.ctr.toFixed(2)}%</p>
+              {previousData && <ComparisonBadge current={dashboardData.ctr} previous={previousData.ctr} />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -235,6 +290,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
                 <DollarSign className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpcMedio)}</p>
+              {previousData && <ComparisonBadge current={dashboardData.cpcMedio} previous={previousData.cpcMedio} invert />}
             </div>
           </div>
 

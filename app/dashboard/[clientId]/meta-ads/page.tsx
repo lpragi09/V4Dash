@@ -15,6 +15,7 @@ import {
 import Link from 'next/link';
 import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
+import ComparisonBadge from '@/components/ComparisonBadge';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,77 @@ interface MetaDailyInsight {
   date_start: string;
   spend?: string;
   actions?: { action_type: string; value: string }[];
+}
+
+interface MetaAggregate {
+  gastos: number;
+  leads: number;
+  cliques: number;
+  cpl: number;
+  impressoes: number;
+  alcance: number;
+  frequencia: number;
+  ctr: number;
+  cpm: number;
+}
+
+function fmtDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** Janela dos últimos 30 dias (incluindo hoje) e os 30 dias imediatamente anteriores. */
+function getPeriods() {
+  const currentUntil = new Date();
+  const currentSince = new Date();
+  currentSince.setDate(currentSince.getDate() - 29);
+
+  const previousUntil = new Date();
+  previousUntil.setDate(previousUntil.getDate() - 30);
+  const previousSince = new Date();
+  previousSince.setDate(previousSince.getDate() - 59);
+
+  return {
+    current: { since: fmtDate(currentSince), until: fmtDate(currentUntil) },
+    previous: { since: fmtDate(previousSince), until: fmtDate(previousUntil) },
+  };
+}
+
+async function fetchMetaAggregate(
+  accountId: string,
+  accessToken: string,
+  range: { since: string; until: string }
+): Promise<MetaAggregate> {
+  const fields = 'spend,clicks,impressions,reach,frequency,ctr,cpm,actions';
+  const timeRange = encodeURIComponent(JSON.stringify(range));
+  const url = `https://graph.facebook.com/v19.0/${accountId}/insights?access_token=${accessToken}&time_range=${timeRange}&fields=${fields}`;
+  const response = await fetch(url, { cache: 'no-store' });
+  const responseData = await response.json();
+
+  if (responseData.error) {
+    throw new Error(responseData.error.message || 'Erro na Graph API do Meta');
+  }
+
+  const insights = responseData.data && responseData.data.length > 0 ? responseData.data[0] : null;
+
+  let leadsCount = 0;
+  if (insights?.actions) {
+    const leadAction = (insights.actions as { action_type: string; value: string }[]).find((a) => a.action_type === 'lead');
+    if (leadAction) leadsCount = parseInt(leadAction.value, 10);
+  }
+
+  const spend = insights ? parseFloat(insights.spend || '0') : 0;
+
+  return {
+    gastos: spend,
+    leads: leadsCount,
+    cliques: insights ? parseInt(insights.clicks || '0', 10) : 0,
+    cpl: leadsCount > 0 ? spend / leadsCount : 0,
+    impressoes: insights ? parseInt(insights.impressions || '0', 10) : 0,
+    alcance: insights ? parseInt(insights.reach || '0', 10) : 0,
+    frequencia: insights ? parseFloat(insights.frequency || '0') : 0,
+    ctr: insights ? parseFloat(insights.ctr || '0') : 0,
+    cpm: insights ? parseFloat(insights.cpm || '0') : 0,
+  };
 }
 
 export default async function MetaAdsClientPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -47,7 +119,8 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
   const metaAccountId = metaInt?.conta_id;
   const accessToken = metaInt?.access_token;
 
-  let dashboardData = null;
+  let dashboardData: MetaAggregate | null = null;
+  let previousData: MetaAggregate | null = null;
   let fetchError = null;
   let dailySpend: { date: string; value: number }[] = [];
   let dailyLeads: { date: string; value: number }[] = [];
@@ -58,43 +131,16 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
     fetchError = "Token de Acesso do Meta (META_ACCESS_TOKEN) não configurado no servidor.";
   } else {
     try {
-      // Faz a chamada real para a Graph API do Meta (Insights dos últimos 30 dias)
       const normalizedAccountId = metaAccountId.startsWith('act_') ? metaAccountId : `act_${metaAccountId}`;
-      const fields = 'spend,clicks,impressions,reach,frequency,ctr,cpm,actions';
-      const url = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&fields=${fields}`;
-      const response = await fetch(url, { cache: 'no-store' });
-      const responseData = await response.json();
+      const { current, previous } = getPeriods();
 
-      if (responseData.error) {
-        throw new Error(responseData.error.message || "Erro na Graph API do Meta");
+      dashboardData = await fetchMetaAggregate(normalizedAccountId, accessToken, current);
+
+      try {
+        previousData = await fetchMetaAggregate(normalizedAccountId, accessToken, previous);
+      } catch (err) {
+        console.error('Error fetching previous period Meta Ads:', err);
       }
-
-      // Processa os dados
-      // Se não houver dados no período, os valores serão 0
-      const insights = responseData.data && responseData.data.length > 0 ? responseData.data[0] : null;
-
-      let leadsCount = 0;
-      if (insights && insights.actions) {
-        // 'lead' é o action_type padrão, mas dependendo da conversão pode ser outro
-        const leadAction = (insights.actions as { action_type: string; value: string }[]).find((a) => a.action_type === 'lead');
-        if (leadAction) leadsCount = parseInt(leadAction.value);
-      }
-
-      const spend = insights ? parseFloat(insights.spend || '0') : 0;
-      const clicks = insights ? parseInt(insights.clicks || '0') : 0;
-      const cpl = leadsCount > 0 ? (spend / leadsCount) : 0;
-
-      dashboardData = {
-        gastos: spend,
-        leads: leadsCount,
-        cliques: clicks,
-        cpl: cpl,
-        impressoes: insights ? parseInt(insights.impressions || '0') : 0,
-        alcance: insights ? parseInt(insights.reach || '0') : 0,
-        frequencia: insights ? parseFloat(insights.frequency || '0') : 0,
-        ctr: insights ? parseFloat(insights.ctr || '0') : 0,
-        cpm: insights ? parseFloat(insights.cpm || '0') : 0,
-      };
 
       // Busca a série diária (últimos 30 dias) para os gráficos
       const dailyUrl = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&time_increment=1&fields=spend,actions`;
@@ -163,8 +209,9 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <DollarSign className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.gastos)}</p>
+              {previousData && <ComparisonBadge current={dashboardData.gastos} previous={previousData.gastos} invert />}
             </div>
-            
+
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
@@ -174,6 +221,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <Users className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.leads}</p>
+              {previousData && <ComparisonBadge current={dashboardData.leads} previous={previousData.leads} />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -185,6 +233,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <TrendingUp className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpl)}</p>
+              {previousData && <ComparisonBadge current={dashboardData.cpl} previous={previousData.cpl} invert />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -196,6 +245,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <Activity className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.cliques}</p>
+              {previousData && <ComparisonBadge current={dashboardData.cliques} previous={previousData.cliques} />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -207,6 +257,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <Eye className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.impressoes}</p>
+              {previousData && <ComparisonBadge current={dashboardData.impressoes} previous={previousData.impressoes} />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -218,6 +269,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <Radar className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.alcance}</p>
+              {previousData && <ComparisonBadge current={dashboardData.alcance} previous={previousData.alcance} />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -229,6 +281,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <Repeat className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.frequencia.toFixed(2)}</p>
+              {previousData && <ComparisonBadge current={dashboardData.frequencia} previous={previousData.frequencia} />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -240,6 +293,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <Percent className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{dashboardData.ctr.toFixed(2)}%</p>
+              {previousData && <ComparisonBadge current={dashboardData.ctr} previous={previousData.ctr} />}
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
@@ -251,6 +305,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
                 <DollarSign className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpm)}</p>
+              {previousData && <ComparisonBadge current={dashboardData.cpm} previous={previousData.cpm} invert />}
             </div>
           </div>
 

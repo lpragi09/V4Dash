@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
+import ComparisonBadge from '@/components/ComparisonBadge';
 
 // Force dynamic since it depends on params
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,16 @@ function lastNDates(n: number): string[] {
 function alignSeries(dates: string[], rows: { date: string; value: number }[]): { date: string; value: number }[] {
   const map = new Map(rows.map((r) => [r.date, r.value]));
   return dates.map((d) => ({ date: d, value: map.get(d) || 0 }));
+}
+
+/** Os 30 dias imediatamente anteriores à janela atual (últimos 30 dias), pra comparação mês a mês. */
+function previousPeriodRange(): { since: string; until: string } {
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const until = new Date();
+  until.setDate(until.getDate() - 30);
+  const since = new Date();
+  since.setDate(since.getDate() - 59);
+  return { since: fmt(since), until: fmt(until) };
 }
 
 export default async function ClientOverviewPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -67,8 +78,11 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
 
   let metaData = { gastos: 0, leads: 0, cpl: 0 };
   let googleData = { gastos: 0, leads: 0, cpl: 0 };
+  let metaPrevData = { gastos: 0, leads: 0, cpl: 0 };
+  let googlePrevData = { gastos: 0, leads: 0, cpl: 0 };
   let crmData = { oportunidades: 0, ganhas: 0, perdidas: 0, valorGanho: 0 };
   const dateRange = lastNDates(30);
+  const previousRange = previousPeriodRange();
   let metaDailySpend: { date: string; value: number }[] = alignSeries(dateRange, []);
   let googleDailySpend: { date: string; value: number }[] = alignSeries(dateRange, []);
 
@@ -103,6 +117,24 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
         dateRange,
         dailyRows.map((row) => ({ date: row.date_start, value: parseFloat(row.spend || '0') }))
       );
+
+      // Período anterior (para comparação mês a mês)
+      const prevTimeRange = encodeURIComponent(JSON.stringify(previousRange));
+      const prevUrl = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${metaInt.access_token}&time_range=${prevTimeRange}&fields=spend,actions`;
+      const prevRes = await fetch(prevUrl, { cache: 'no-store' });
+      const prevJson = await prevRes.json();
+      const prevInsights = prevJson.data && prevJson.data.length > 0 ? prevJson.data[0] : null;
+      let prevLeadsCount = 0;
+      if (prevInsights?.actions) {
+        const leadAction = (prevInsights.actions as { action_type: string; value: string }[]).find((a) => a.action_type === 'lead');
+        if (leadAction) prevLeadsCount = parseInt(leadAction.value);
+      }
+      const prevSpend = prevInsights ? parseFloat(prevInsights.spend || '0') : 0;
+      metaPrevData = {
+        gastos: prevSpend,
+        leads: prevLeadsCount,
+        cpl: prevLeadsCount > 0 ? prevSpend / prevLeadsCount : 0,
+      };
     } catch(err) {
       console.error("Error fetching Meta Ads:", err);
     }
@@ -144,6 +176,17 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
           .filter((row) => row.segments?.date)
           .map((row) => ({ date: row.segments!.date!, value: Number(row.metrics?.costMicros || 0) / 1_000_000 }))
       );
+
+      // Período anterior (para comparação mês a mês)
+      const prevQuery = `SELECT metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date BETWEEN '${previousRange.since}' AND '${previousRange.until}'`;
+      const prevRes = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+        method: 'POST', headers, body: JSON.stringify({ query: prevQuery }), cache: 'no-store',
+      });
+      const prevBody = await prevRes.json();
+      const prevMetrics = prevBody.results?.[0]?.metrics;
+      const prevSpend = prevMetrics ? Number(prevMetrics.costMicros || 0) / 1_000_000 : 0;
+      const prevLeads = prevMetrics ? Number(prevMetrics.conversions || 0) : 0;
+      googlePrevData = { gastos: prevSpend, leads: prevLeads, cpl: prevLeads > 0 ? prevSpend / prevLeads : 0 };
     } catch (err) {
       console.error("Error fetching Google Ads:", err);
     }
@@ -189,6 +232,12 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   const totalLeads = metaData.leads + googleData.leads;
   const cplGeral = totalLeads > 0 ? totalGastos / totalLeads : 0;
   const receitaCRM = crmData.valorGanho;
+
+  // Aggregate Data (período anterior, para comparação)
+  const totalGastosPrev = metaPrevData.gastos + googlePrevData.gastos;
+  const totalLeadsPrev = metaPrevData.leads + googlePrevData.leads;
+  const cplGeralPrev = totalLeadsPrev > 0 ? totalGastosPrev / totalLeadsPrev : 0;
+  const hasPreviousData = totalGastosPrev > 0 || totalLeadsPrev > 0;
 
   const dashboardData = {
     visao_geral: {
@@ -265,6 +314,9 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
             <p className="text-3xl font-bold text-white mb-2">
               {formatCurrency(dashboardData.visao_geral.investimento_total)}
             </p>
+            {hasPreviousData && (
+              <ComparisonBadge current={totalGastos} previous={totalGastosPrev} invert />
+            )}
           </div>
 
           {/* Total Leads */}
@@ -281,6 +333,9 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
             <p className="text-3xl font-bold text-white mb-2">
               {dashboardData.visao_geral.leads_totais}
             </p>
+            {hasPreviousData && (
+              <ComparisonBadge current={totalLeads} previous={totalLeadsPrev} />
+            )}
           </div>
 
           {/* CPL */}
@@ -297,6 +352,9 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
             <p className="text-3xl font-bold text-white mb-2">
               {formatCurrency(dashboardData.visao_geral.cpl_geral)}
             </p>
+            {hasPreviousData && (
+              <ComparisonBadge current={cplGeral} previous={cplGeralPrev} invert />
+            )}
           </div>
 
         </div>
