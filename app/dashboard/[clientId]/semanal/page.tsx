@@ -9,6 +9,7 @@ import {
   TrendingUp
 } from 'lucide-react';
 import TrendChart from '@/components/TrendChart';
+import { getValidAgencyGoogleToken } from '@/lib/google-agency';
 import InfoTooltip from '@/components/InfoTooltip';
 
 export const dynamic = 'force-dynamic';
@@ -211,6 +212,7 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
 
   const dateRange = lastNDates(7);
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  const googleAccessToken = await getValidAgencyGoogleToken(supabase);
 
   // Meta, Google e CRM são independentes entre si — buscados em paralelo,
   // não um esperando o outro terminar.
@@ -218,8 +220,8 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
     metaInt?.access_token && metaInt?.conta_id
       ? fetchMeta(metaInt.access_token, metaInt.conta_id, dateRange)
       : Promise.reject(new Error('Meta Ads não configurado')),
-    googleInt?.access_token && googleInt?.conta_id && developerToken
-      ? fetchGoogle(googleInt.access_token, googleInt.conta_id, developerToken, dateRange)
+    googleAccessToken && googleInt?.conta_id && developerToken
+      ? fetchGoogle(googleAccessToken, googleInt.conta_id, developerToken, dateRange)
       : Promise.reject(new Error('Google Ads não configurado')),
     crmInt?.access_token && crmInt?.conta_id
       ? fetchCrm(crmInt.access_token, crmInt.conta_id)
@@ -256,7 +258,7 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
     crm: crmData
   };
 
-  if (!metaInt?.access_token && !googleInt?.access_token && !crmInt?.access_token) {
+  if (!metaInt?.access_token && !googleAccessToken && !crmInt?.access_token) {
     fetchError = "Nenhuma integração conectada. Vá em Configurações Gerais para vincular Meta Ads, Google Ads e Kommo CRM.";
   }
 
@@ -352,7 +354,7 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
 
           </div>
 
-          {(metaInt?.access_token || googleInt?.access_token) && (
+          {(metaInt?.access_token || googleAccessToken) && (
             <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8 relative z-10 mt-8">
               <h2 className="text-xl font-bold text-white mb-6">Investimento Diário por Canal</h2>
               <TrendChart

@@ -15,6 +15,7 @@ import Link from 'next/link';
 import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
 import ComparisonBadge from '@/components/ComparisonBadge';
+import { getValidAgencyGoogleToken } from '@/lib/google-agency';
 
 export const dynamic = 'force-dynamic';
 
@@ -109,7 +110,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
     .single();
 
   const googleAccountId = googleInt?.conta_id;
-  const accessToken = googleInt?.access_token;
+  const accessToken = await getValidAgencyGoogleToken(supabase);
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 
   let dashboardData: GoogleAggregate | null = null;
@@ -119,9 +120,9 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
   let dailyClicks: { date: string; value: number }[] = [];
 
   if (!accessToken) {
-    fetchError = "Google Ads não conectado para este cliente. Autorize em Configurações Gerais.";
+    fetchError = "Google Ads não autorizado pela agência. Autorize em Configurações Gerais.";
   } else if (!googleAccountId) {
-    fetchError = "Google Ads conectado, mas nenhuma conta de anúncios foi selecionada. Escolha uma conta em Configurações Gerais.";
+    fetchError = "Nenhuma conta de anúncios foi selecionada para este cliente. Escolha uma conta em Configurações Gerais.";
   } else if (!developerToken) {
     fetchError = "Token de Desenvolvedor do Google Ads (GOOGLE_ADS_DEVELOPER_TOKEN) não configurado no servidor.";
   } else {
@@ -209,7 +210,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
               <p className="text-red-200/70">{fetchError}</p>
             </div>
           </div>
-          {!googleAccountId && (
+          {(!accessToken || !googleAccountId) && (
              <Link href="/dashboard/settings" className="mt-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
                <Settings className="w-4 h-4" />
                Vincular Conta em Configurações

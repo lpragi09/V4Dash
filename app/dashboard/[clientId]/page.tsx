@@ -11,6 +11,7 @@ import {
 import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
 import ComparisonBadge from '@/components/ComparisonBadge';
+import { getValidAgencyGoogleToken } from '@/lib/google-agency';
 
 // Force dynamic since it depends on params
 export const dynamic = 'force-dynamic';
@@ -245,6 +246,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   const dateRange = lastNDates(30);
   const previousRange = previousPeriodRange();
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  const googleAccessToken = await getValidAgencyGoogleToken(supabase);
 
   // Meta, Google e CRM são independentes entre si — buscados em paralelo,
   // não um esperando o outro terminar (era o principal motivo da lentidão).
@@ -252,8 +254,8 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
     metaInt?.access_token && metaInt?.conta_id
       ? fetchMeta(metaInt.access_token, metaInt.conta_id, dateRange, previousRange)
       : Promise.reject(new Error('Meta Ads não configurado')),
-    googleInt?.access_token && googleInt?.conta_id && developerToken
-      ? fetchGoogle(googleInt.access_token, googleInt.conta_id, developerToken, dateRange, previousRange)
+    googleAccessToken && googleInt?.conta_id && developerToken
+      ? fetchGoogle(googleAccessToken, googleInt.conta_id, developerToken, dateRange, previousRange)
       : Promise.reject(new Error('Google Ads não configurado')),
     crmInt?.access_token && crmInt?.conta_id
       ? fetchCrm(crmInt.access_token, crmInt.conta_id)
@@ -298,7 +300,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
     crm: crmData
   };
 
-  if (!metaInt?.access_token && !googleInt?.access_token && !crmInt?.access_token) {
+  if (!metaInt?.access_token && !googleAccessToken && !crmInt?.access_token) {
     fetchError = "Nenhuma integração conectada. Vá em Configurações Gerais para vincular Meta Ads, Google Ads e Kommo CRM.";
   }
 
@@ -408,7 +410,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
       )}
 
       {/* Investment Trend */}
-      {dashboardData && (metaInt?.access_token || googleInt?.access_token) && (
+      {dashboardData && (metaInt?.access_token || googleAccessToken) && (
         <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8 relative z-10 mt-8">
           <h2 className="text-xl font-bold text-white mb-6">Investimento Diário por Canal</h2>
           <TrendChart

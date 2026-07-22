@@ -46,6 +46,10 @@ function SettingsContent() {
   const [loadingAccounts, setLoadingAccounts] = useState({ meta: false, google: false });
   const [isSavingConnections, setIsSavingConnections] = useState(false);
 
+  // Google Ads agora é autorizado uma vez só pra agência (via MCC), não por cliente
+  const [agencyGoogleConnected, setAgencyGoogleConnected] = useState(false);
+  const [googleAccountsError, setGoogleAccountsError] = useState('');
+
   // Kommo manual connection states
   const [kommoSubdomain, setKommoSubdomain] = useState('');
   const [kommoIntegrationId, setKommoIntegrationId] = useState('');
@@ -114,18 +118,39 @@ function SettingsContent() {
         setMetaAccounts([]);
       }
 
-      if (client.google_connected) {
-        setLoadingAccounts(prev => ({ ...prev, google: true }));
-        fetch(`/api/google/accounts?clientId=${id}`)
-          .then(res => res.json())
-          .then(data => {
-            if (data.accounts) setGoogleAccounts(data.accounts);
-            setLoadingAccounts(prev => ({ ...prev, google: false }));
-          }).catch(() => setLoadingAccounts(prev => ({ ...prev, google: false })));
-      } else {
-        setGoogleAccounts([]);
-      }
+      // Contas do Google Ads vêm da MCC (agência), buscadas uma vez só em fetchAgencyStatus — não por cliente.
     }
+  };
+
+  const fetchAgencyStatus = async () => {
+    const { data: agencyInt } = await supabase
+      .from('integracoes_agencia')
+      .select('*')
+      .eq('plataforma', 'google_ads')
+      .maybeSingle();
+
+    const connected = !!agencyInt?.access_token;
+    setAgencyGoogleConnected(connected);
+
+    if (!connected) {
+      setGoogleAccounts([]);
+      return;
+    }
+
+    setLoadingAccounts(prev => ({ ...prev, google: true }));
+    try {
+      const res = await fetch('/api/google/mcc-accounts');
+      const data = await res.json();
+      if (data.accounts) {
+        setGoogleAccounts(data.accounts);
+        setGoogleAccountsError('');
+      } else {
+        setGoogleAccountsError(data.error || 'Erro ao buscar contas da MCC.');
+      }
+    } catch {
+      setGoogleAccountsError('Erro ao buscar contas da MCC.');
+    }
+    setLoadingAccounts(prev => ({ ...prev, google: false }));
   };
 
   const fetchClients = async (preserveSelection = true) => {
@@ -150,7 +175,7 @@ function SettingsContent() {
           meta_ads_account_id: metaInt?.conta_id || '',
           meta_connected: !!metaInt?.access_token,
           google_ads_account_id: googleInt?.conta_id || '',
-          google_connected: !!googleInt?.access_token,
+          google_connected: !!googleInt?.conta_id,
           crm_account_id: crmInt?.conta_id || '',
           crm_connected: !!crmInt?.access_token
         };
@@ -166,7 +191,9 @@ function SettingsContent() {
 
   useEffect(() => {
     fetchClients();
-    
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carregamento inicial via Supabase; não há lib de data-fetching no projeto.
+    fetchAgencyStatus();
+
     const successMsg = searchParams.get('success');
     const errorMsg = searchParams.get('error');
     if (successMsg || errorMsg) {
@@ -490,9 +517,9 @@ function SettingsContent() {
                   </div>
                   
                   <div className="flex-1 w-full flex flex-col items-start gap-3">
-                    {!selectedClient.google_connected ? (
-                      <a 
-                        href={`/api/auth/google?clientId=${selectedClient.id}`} 
+                    {!agencyGoogleConnected ? (
+                      <a
+                        href="/api/auth/google-agency"
                         className="inline-flex items-center justify-center w-full md:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-emerald-500/20"
                       >
                         Autorizar com Google
@@ -502,22 +529,34 @@ function SettingsContent() {
                         <div className="flex items-center justify-between gap-2 mb-2">
                           <div className="flex items-center gap-2">
                             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                            <span className="text-xs font-semibold text-emerald-500">Autorizado</span>
+                            <span className="text-xs font-semibold text-emerald-500">Autorizado (agência via MCC)</span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleDisconnect('google_ads')}
-                            className="text-xs text-zinc-500 hover:text-red-500 transition-colors underline underline-offset-2"
-                          >
-                            Desconectar
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <a
+                              href="/api/auth/google-agency"
+                              className="text-xs text-zinc-500 hover:text-emerald-500 transition-colors underline underline-offset-2"
+                            >
+                              Reautorizar
+                            </a>
+                            {selectedClient.google_connected && (
+                              <button
+                                type="button"
+                                onClick={() => handleDisconnect('google_ads')}
+                                className="text-xs text-zinc-500 hover:text-red-500 transition-colors underline underline-offset-2"
+                              >
+                                Desconectar
+                              </button>
+                            )}
+                          </div>
                         </div>
                         {loadingAccounts.google ? (
                           <div className="flex items-center gap-2 text-zinc-400 text-sm py-2">
-                            <Loader2 className="w-4 h-4 animate-spin" /> Carregando contas...
+                            <Loader2 className="w-4 h-4 animate-spin" /> Carregando contas da MCC...
                           </div>
+                        ) : googleAccountsError ? (
+                          <p className="text-xs text-red-400">{googleAccountsError}</p>
                         ) : (
-                          <select 
+                          <select
                             value={googleId}
                             onChange={(e) => setGoogleId(e.target.value)}
                             className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 transition-colors"
@@ -578,7 +617,7 @@ function SettingsContent() {
               </div>
 
               {/* Só mostrar o botão de salvar se tivermos Dropdowns para salvar */}
-              {(selectedClient.meta_connected || selectedClient.google_connected) && (
+              {(selectedClient.meta_connected || agencyGoogleConnected) && (
                 <div className="mt-8 flex justify-end pt-6 border-t border-[#27272a]">
                   <button 
                     onClick={handleSaveConnections}
