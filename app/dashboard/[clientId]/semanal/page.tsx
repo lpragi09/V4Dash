@@ -132,7 +132,7 @@ async function fetchGoogle(
  * sequência) — contas com milhares de leads levavam dezenas de segundos
  * fazendo uma requisição de cada vez e esperando a resposta antes da próxima.
  */
-async function fetchAllKommoLeads(domain: string, accessToken: string): Promise<KommoLead[]> {
+async function fetchAllKommoLeads(domain: string, accessToken: string, createdAfterUnix?: number): Promise<KommoLead[]> {
   const limit = 250;
   const batchSize = 5;
   const maxPages = 20;
@@ -144,7 +144,13 @@ async function fetchAllKommoLeads(domain: string, accessToken: string): Promise<
 
     const results = await Promise.all(
       pagesInBatch.map(async (p) => {
-        const res = await fetch(`https://${domain}/api/v4/leads?limit=${limit}&page=${p}`, {
+        const url = new URL(`https://${domain}/api/v4/leads`);
+        url.searchParams.set('limit', String(limit));
+        url.searchParams.set('page', String(p));
+        if (createdAfterUnix) {
+          url.searchParams.set('filter[created_at][from]', String(createdAfterUnix));
+        }
+        const res = await fetch(url.toString(), {
           headers: { Authorization: `Bearer ${accessToken}` },
           cache: 'no-store',
         });
@@ -168,10 +174,13 @@ async function fetchAllKommoLeads(domain: string, accessToken: string): Promise<
   return allLeads;
 }
 
-async function fetchCrm(accessToken: string, contaId: string): Promise<CrmAggregate> {
+async function fetchCrm(accessToken: string, contaId: string, days: number): Promise<CrmAggregate> {
   const STATUS_GANHO = 142;
   const STATUS_PERDIDO = 143;
-  const leads = await fetchAllKommoLeads(contaId, accessToken);
+  const createdAfterDate = new Date();
+  createdAfterDate.setDate(createdAfterDate.getDate() - days);
+  const createdAfterUnix = Math.floor(createdAfterDate.getTime() / 1000);
+  const leads = await fetchAllKommoLeads(contaId, accessToken, createdAfterUnix);
 
   let oportunidades = 0, ganhas = 0, perdidas = 0, valorGanho = 0;
   for (const lead of leads) {
@@ -226,7 +235,7 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
       ? fetchGoogle(googleAccessToken, googleInt.conta_id, developerToken, dateRange)
       : Promise.reject(new Error('Google Ads não configurado')),
     crmInt?.access_token && crmInt?.conta_id
-      ? fetchCrm(crmInt.access_token, crmInt.conta_id)
+      ? fetchCrm(crmInt.access_token, crmInt.conta_id, 7)
       : Promise.reject(new Error('CRM não configurado')),
   ]);
 
