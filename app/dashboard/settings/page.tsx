@@ -272,11 +272,15 @@ function SettingsContent() {
 
     const syncAccountId = async (plataforma: string, contaId: string) => {
       if (contaId.trim()) {
+        // upsert em vez de update: para o Google Ads (agora agência-wide), o
+        // cliente pode ainda não ter nenhuma linha em integracoes_clientes —
+        // um update simples não cria a linha, só atualiza uma que já existe.
         await supabase
           .from('integracoes_clientes')
-          .update({ conta_id: contaId.trim() })
-          .eq('cliente_id', selectedClientId)
-          .eq('plataforma', plataforma);
+          .upsert(
+            { cliente_id: selectedClientId, plataforma, conta_id: contaId.trim() },
+            { onConflict: 'cliente_id,plataforma' }
+          );
       }
     };
 
