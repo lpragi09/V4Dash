@@ -45,6 +45,10 @@ function unixToDate(unixSeconds: number): string {
  * sequência) — contas com milhares de leads levavam dezenas de segundos
  * fazendo uma requisição de cada vez e esperando a resposta antes da próxima.
  */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchAllKommoLeads(domain: string, accessToken: string, createdAfterUnix?: number): Promise<KommoLead[]> {
   const limit = 250;
   const batchSize = 5;
@@ -63,17 +67,29 @@ async function fetchAllKommoLeads(domain: string, accessToken: string, createdAf
         if (createdAfterUnix) {
           url.searchParams.set('filter[created_at][from]', String(createdAfterUnix));
         }
-        const res = await fetch(url.toString(), {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          cache: 'no-store',
-        });
-        if (res.status === 204) return [] as KommoLead[];
-        if (!res.ok) {
-          const errBody = await res.json().catch(() => ({}) as Record<string, string>);
-          throw new Error(errBody.title || errBody.hint || `Erro ao buscar leads do Kommo (${res.status})`);
+
+        // Retry com backoff se o Kommo responder 429 (rate limit) —
+        // as buscas paralelas ocasionalmente estouram o limite por segundo da API.
+        let attempt = 0;
+        while (true) {
+          const res = await fetch(url.toString(), {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            cache: 'no-store',
+          });
+          if (res.status === 204) return [] as KommoLead[];
+          if (res.status === 429 && attempt < 3) {
+            const retryAfter = Number(res.headers.get('Retry-After')) || 1;
+            await sleep(retryAfter * 1000 * (attempt + 1));
+            attempt += 1;
+            continue;
+          }
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}) as Record<string, string>);
+            throw new Error(errBody.title || errBody.hint || `Erro ao buscar leads do Kommo (${res.status})`);
+          }
+          const json = await res.json();
+          return (json._embedded?.leads || []) as KommoLead[];
         }
-        const json = await res.json();
-        return (json._embedded?.leads || []) as KommoLead[];
       })
     );
 
@@ -140,11 +156,11 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
       // Totais são calculados sobre o histórico inteiro (paginação pode não
       // alcançar os leads mais recentes se houver muito histórico), então os
       // gráficos diários usam uma busca à parte, filtrada pelos últimos 30 dias,
-      // pra garantir que os dias recentes sempre apareçam.
-      const [leads, recentLeads] = await Promise.all([
-        fetchAllKommoLeads(crmAccountId, accessToken),
-        fetchAllKommoLeads(crmAccountId, accessToken, Math.floor(cutoff)),
-      ]);
+      // pra garantir que os dias recentes sempre apareçam. As duas buscas rodam
+      // em sequência (não em paralelo) pra não estourar o rate limit do Kommo,
+      // já que cada uma já dispara várias requisições simultâneas por conta própria.
+      const leads = await fetchAllKommoLeads(crmAccountId, accessToken);
+      const recentLeads = await fetchAllKommoLeads(crmAccountId, accessToken, Math.floor(cutoff));
 
       for (const lead of leads) {
         oportunidades += 1;
