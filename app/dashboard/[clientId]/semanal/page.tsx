@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import TrendChart from '@/components/TrendChart';
 import { getValidAgencyGoogleToken } from '@/lib/google-agency';
+import { getValidAgencyMetaToken } from '@/lib/meta-agency';
 import InfoTooltip from '@/components/InfoTooltip';
 
 export const dynamic = 'force-dynamic';
@@ -213,12 +214,13 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
   const dateRange = lastNDates(7);
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
   const googleAccessToken = await getValidAgencyGoogleToken(supabase);
+  const metaAccessToken = await getValidAgencyMetaToken(supabase);
 
   // Meta, Google e CRM são independentes entre si — buscados em paralelo,
   // não um esperando o outro terminar.
   const [metaResult, googleResult, crmResult] = await Promise.allSettled([
-    metaInt?.access_token && metaInt?.conta_id
-      ? fetchMeta(metaInt.access_token, metaInt.conta_id, dateRange)
+    metaAccessToken && metaInt?.conta_id
+      ? fetchMeta(metaAccessToken, metaInt.conta_id, dateRange)
       : Promise.reject(new Error('Meta Ads não configurado')),
     googleAccessToken && googleInt?.conta_id && developerToken
       ? fetchGoogle(googleAccessToken, googleInt.conta_id, developerToken, dateRange)
@@ -258,7 +260,7 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
     crm: crmData
   };
 
-  if (!metaInt?.access_token && !googleAccessToken && !crmInt?.access_token) {
+  if (!metaAccessToken && !googleAccessToken && !crmInt?.access_token) {
     fetchError = "Nenhuma integração conectada. Vá em Configurações Gerais para vincular Meta Ads, Google Ads e Kommo CRM.";
   }
 
@@ -354,7 +356,7 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
 
           </div>
 
-          {(metaInt?.access_token || googleAccessToken) && (
+          {(metaAccessToken || googleAccessToken) && (
             <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8 relative z-10 mt-8">
               <h2 className="text-xl font-bold text-white mb-6">Investimento Diário por Canal</h2>
               <TrendChart

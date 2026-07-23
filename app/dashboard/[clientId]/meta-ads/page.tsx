@@ -16,6 +16,7 @@ import Link from 'next/link';
 import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
 import ComparisonBadge from '@/components/ComparisonBadge';
+import { getValidAgencyMetaToken } from '@/lib/meta-agency';
 
 export const dynamic = 'force-dynamic';
 
@@ -117,7 +118,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
     .single();
 
   const metaAccountId = metaInt?.conta_id;
-  const accessToken = metaInt?.access_token;
+  const accessToken = await getValidAgencyMetaToken(supabase);
 
   let dashboardData: MetaAggregate | null = null;
   let previousData: MetaAggregate | null = null;
@@ -125,10 +126,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
   let dailySpend: { date: string; value: number }[] = [];
   let dailyLeads: { date: string; value: number }[] = [];
 
-  if (!metaAccountId) {
-    fetchError = "Conta de anúncios do Meta não vinculada a este cliente. Configure em Configurações Gerais.";
-  } else if (!accessToken) {
-    fetchError = "Token de Acesso do Meta (META_ACCESS_TOKEN) não configurado no servidor.";
+  if (!accessToken) {
+    fetchError = "Meta Ads não autorizado pela agência. Autorize em Configurações Gerais.";
+  } else if (!metaAccountId) {
+    fetchError = "Nenhuma conta de anúncios foi selecionada para este cliente. Escolha uma conta em Configurações Gerais.";
   } else {
     try {
       const normalizedAccountId = metaAccountId.startsWith('act_') ? metaAccountId : `act_${metaAccountId}`;
@@ -199,7 +200,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
               <p className="text-red-200/70">{fetchError}</p>
             </div>
           </div>
-          {!metaAccountId && (
+          {(!accessToken || !metaAccountId) && (
              <Link href="/dashboard/settings" className="mt-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
                <Settings className="w-4 h-4" />
                Vincular Conta em Configurações

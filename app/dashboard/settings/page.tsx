@@ -21,6 +21,7 @@ interface Client {
 interface AdAccount {
   account_id: string;
   name: string;
+  business_name?: string;
 }
 
 function SettingsContent() {
@@ -46,7 +47,9 @@ function SettingsContent() {
   const [loadingAccounts, setLoadingAccounts] = useState({ meta: false, google: false });
   const [isSavingConnections, setIsSavingConnections] = useState(false);
 
-  // Google Ads agora é autorizado uma vez só pra agência (via MCC), não por cliente
+  // Meta Ads e Google Ads agora são autorizados uma vez só pra agência, não por cliente
+  const [agencyMetaConnected, setAgencyMetaConnected] = useState(false);
+  const [metaAccountsError, setMetaAccountsError] = useState('');
   const [agencyGoogleConnected, setAgencyGoogleConnected] = useState(false);
   const [googleAccountsError, setGoogleAccountsError] = useState('');
 
@@ -104,53 +107,62 @@ function SettingsContent() {
       setSelectedClientId(id);
       setMetaId(client.meta_ads_account_id || '');
       setGoogleId(client.google_ads_account_id || '');
-
-      // Fetch accounts if connected
-      if (client.meta_connected) {
-        setLoadingAccounts(prev => ({ ...prev, meta: true }));
-        fetch(`/api/meta/accounts?clientId=${id}`)
-          .then(res => res.json())
-          .then(data => {
-            if (data.accounts) setMetaAccounts(data.accounts);
-            setLoadingAccounts(prev => ({ ...prev, meta: false }));
-          }).catch(() => setLoadingAccounts(prev => ({ ...prev, meta: false })));
-      } else {
-        setMetaAccounts([]);
-      }
-
-      // Contas do Google Ads vêm da MCC (agência), buscadas uma vez só em fetchAgencyStatus — não por cliente.
+      // Contas do Meta e do Google Ads vêm de autorizações da agência, buscadas
+      // uma vez só em fetchAgencyStatus — não por cliente.
     }
   };
 
   const fetchAgencyStatus = async () => {
-    const { data: agencyInt } = await supabase
+    const { data: agencyInts } = await supabase
       .from('integracoes_agencia')
       .select('*')
-      .eq('plataforma', 'google_ads')
-      .maybeSingle();
+      .in('plataforma', ['meta_ads', 'google_ads']);
 
-    const connected = !!agencyInt?.access_token;
-    setAgencyGoogleConnected(connected);
+    const metaInt = agencyInts?.find(i => i.plataforma === 'meta_ads');
+    const googleInt = agencyInts?.find(i => i.plataforma === 'google_ads');
 
-    if (!connected) {
-      setGoogleAccounts([]);
-      return;
-    }
+    const metaConnected = !!metaInt?.access_token;
+    const googleConnected = !!googleInt?.access_token;
+    setAgencyMetaConnected(metaConnected);
+    setAgencyGoogleConnected(googleConnected);
 
-    setLoadingAccounts(prev => ({ ...prev, google: true }));
-    try {
-      const res = await fetch('/api/google/mcc-accounts');
-      const data = await res.json();
-      if (data.accounts) {
-        setGoogleAccounts(data.accounts);
-        setGoogleAccountsError('');
-      } else {
-        setGoogleAccountsError(data.error || 'Erro ao buscar contas da MCC.');
+    if (metaConnected) {
+      setLoadingAccounts(prev => ({ ...prev, meta: true }));
+      try {
+        const res = await fetch('/api/meta/accounts');
+        const data = await res.json();
+        if (data.accounts) {
+          setMetaAccounts(data.accounts);
+          setMetaAccountsError('');
+        } else {
+          setMetaAccountsError(data.error || 'Erro ao buscar contas do Meta.');
+        }
+      } catch {
+        setMetaAccountsError('Erro ao buscar contas do Meta.');
       }
-    } catch {
-      setGoogleAccountsError('Erro ao buscar contas da MCC.');
+      setLoadingAccounts(prev => ({ ...prev, meta: false }));
+    } else {
+      setMetaAccounts([]);
     }
-    setLoadingAccounts(prev => ({ ...prev, google: false }));
+
+    if (googleConnected) {
+      setLoadingAccounts(prev => ({ ...prev, google: true }));
+      try {
+        const res = await fetch('/api/google/mcc-accounts');
+        const data = await res.json();
+        if (data.accounts) {
+          setGoogleAccounts(data.accounts);
+          setGoogleAccountsError('');
+        } else {
+          setGoogleAccountsError(data.error || 'Erro ao buscar contas da MCC.');
+        }
+      } catch {
+        setGoogleAccountsError('Erro ao buscar contas da MCC.');
+      }
+      setLoadingAccounts(prev => ({ ...prev, google: false }));
+    } else {
+      setGoogleAccounts([]);
+    }
   };
 
   const fetchClients = async (preserveSelection = true) => {
@@ -173,7 +185,7 @@ function SettingsContent() {
         return {
           ...client,
           meta_ads_account_id: metaInt?.conta_id || '',
-          meta_connected: !!metaInt?.access_token,
+          meta_connected: !!metaInt?.conta_id,
           google_ads_account_id: googleInt?.conta_id || '',
           google_connected: !!googleInt?.conta_id,
           crm_account_id: crmInt?.conta_id || '',
@@ -463,9 +475,9 @@ function SettingsContent() {
                   </div>
                   
                   <div className="flex-1 w-full flex flex-col items-start gap-3">
-                    {!selectedClient.meta_connected ? (
-                      <a 
-                        href={`/api/auth/meta?clientId=${selectedClient.id}`} 
+                    {!agencyMetaConnected ? (
+                      <a
+                        href="/api/auth/meta-agency"
                         className="inline-flex items-center justify-center w-full md:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-blue-500/20"
                       >
                         Autorizar com Facebook
@@ -475,31 +487,53 @@ function SettingsContent() {
                         <div className="flex items-center justify-between gap-2 mb-2">
                           <div className="flex items-center gap-2">
                             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                            <span className="text-xs font-semibold text-emerald-500">Autorizado</span>
+                            <span className="text-xs font-semibold text-emerald-500">Autorizado (agência)</span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleDisconnect('meta_ads')}
-                            className="text-xs text-zinc-500 hover:text-red-500 transition-colors underline underline-offset-2"
-                          >
-                            Desconectar
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <a
+                              href="/api/auth/meta-agency"
+                              className="text-xs text-zinc-500 hover:text-blue-500 transition-colors underline underline-offset-2"
+                            >
+                              Reautorizar
+                            </a>
+                            {selectedClient.meta_connected && (
+                              <button
+                                type="button"
+                                onClick={() => handleDisconnect('meta_ads')}
+                                className="text-xs text-zinc-500 hover:text-red-500 transition-colors underline underline-offset-2"
+                              >
+                                Desconectar
+                              </button>
+                            )}
+                          </div>
                         </div>
                         {loadingAccounts.meta ? (
                           <div className="flex items-center gap-2 text-zinc-400 text-sm py-2">
                             <Loader2 className="w-4 h-4 animate-spin" /> Carregando contas...
                           </div>
+                        ) : metaAccountsError ? (
+                          <p className="text-xs text-red-400">{metaAccountsError}</p>
                         ) : (
-                          <select 
+                          <select
                             value={metaId}
                             onChange={(e) => setMetaId(e.target.value)}
                             className="w-full bg-[#18181b] border border-[#27272a] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
                           >
                             <option value="">Selecione uma conta de anúncios</option>
-                            {metaAccounts.map(acc => (
-                              <option key={acc.account_id} value={acc.account_id}>
-                                {acc.name} ({acc.account_id})
-                              </option>
+                            {Object.entries(
+                              metaAccounts.reduce<Record<string, AdAccount[]>>((groups, acc) => {
+                                const key = acc.business_name || 'Sem Business Manager';
+                                (groups[key] ||= []).push(acc);
+                                return groups;
+                              }, {})
+                            ).map(([businessName, accounts]) => (
+                              <optgroup key={businessName} label={businessName}>
+                                {accounts.map(acc => (
+                                  <option key={acc.account_id} value={acc.account_id}>
+                                    {acc.name} ({acc.account_id})
+                                  </option>
+                                ))}
+                              </optgroup>
                             ))}
                           </select>
                         )}
@@ -621,7 +655,7 @@ function SettingsContent() {
               </div>
 
               {/* Só mostrar o botão de salvar se tivermos Dropdowns para salvar */}
-              {(selectedClient.meta_connected || agencyGoogleConnected) && (
+              {(agencyMetaConnected || agencyGoogleConnected) && (
                 <div className="mt-8 flex justify-end pt-6 border-t border-[#27272a]">
                   <button 
                     onClick={handleSaveConnections}

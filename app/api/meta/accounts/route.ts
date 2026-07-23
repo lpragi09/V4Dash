@@ -1,34 +1,44 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { getValidAgencyMetaToken } from '@/lib/meta-agency';
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const clientId = searchParams.get('clientId');
+interface MetaAdAccountRow {
+  account_id?: string;
+  name?: string;
+  business?: { name?: string };
+}
 
-  if (!clientId) return NextResponse.json({ error: 'Client ID required' }, { status: 400 });
-
+export async function GET() {
   const supabase = await createClient();
-  const { data: integration } = await supabase
-    .from('integracoes_clientes')
-    .select('access_token')
-    .eq('cliente_id', clientId)
-    .eq('plataforma', 'meta_ads')
-    .single();
+  const accessToken = await getValidAgencyMetaToken(supabase);
 
-  if (!integration || !integration.access_token) {
-    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  if (!accessToken) {
+    return NextResponse.json({ error: 'Meta Ads não autorizado pela agência. Autorize em Configurações Gerais.' }, { status: 401 });
   }
 
   try {
-    const res = await fetch(`https://graph.facebook.com/v19.0/me/adaccounts?fields=name,account_id&access_token=${integration.access_token}`);
+    const res = await fetch(
+      `https://graph.facebook.com/v19.0/me/adaccounts?fields=name,account_id,business{name}&limit=200&access_token=${accessToken}`
+    );
     const data = await res.json();
 
     if (data.error) {
-      return NextResponse.json({ error: data.error.message }, { status: 400 });
+      console.error('Meta accounts error:', data.error);
+      return NextResponse.json({ error: data.error.message || 'Erro ao buscar contas do Meta.' }, { status: 400 });
     }
 
-    return NextResponse.json({ accounts: data.data });
+    const rows: MetaAdAccountRow[] = data.data || [];
+    const accounts = rows
+      .filter((r) => r.account_id)
+      .map((r) => ({
+        account_id: r.account_id!,
+        name: r.name || `Conta ${r.account_id}`,
+        business_name: r.business?.name || 'Sem Business Manager',
+      }));
+
+    return NextResponse.json({ accounts });
   } catch (err) {
-    return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 });
+    console.error('Meta accounts: unexpected error', err);
+    return NextResponse.json({ error: 'Erro ao buscar contas do Meta.' }, { status: 500 });
   }
 }
