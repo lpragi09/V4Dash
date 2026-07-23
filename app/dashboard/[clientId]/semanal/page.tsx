@@ -99,7 +99,7 @@ async function fetchGoogle(
   }
 
   const search = (query: string) =>
-    fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+    fetch(`https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:search`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ query }),

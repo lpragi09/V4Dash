@@ -62,7 +62,7 @@ async function fetchGoogleAggregate(
 ): Promise<GoogleAggregate> {
   const query = `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.ctr, metrics.average_cpc FROM customer WHERE segments.date BETWEEN '${range.since}' AND '${range.until}'`;
 
-  const res = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+  const res = await fetch(`https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:search`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ query }),
@@ -145,7 +145,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
       const [currentSettled, previousSettled, dailySettled] = await Promise.allSettled([
         fetchGoogleAggregate(customerId, headers, current),
         fetchGoogleAggregate(customerId, headers, previous),
-        fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+        fetch(`https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:search`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ query: dailyQuery }),

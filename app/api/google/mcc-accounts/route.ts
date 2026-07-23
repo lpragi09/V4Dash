@@ -28,7 +28,7 @@ export async function GET() {
   const query = `SELECT customer_client.id, customer_client.descriptive_name FROM customer_client WHERE customer_client.manager = false`;
 
   try {
-    const res = await fetch(`https://googleads.googleapis.com/v19/customers/${cleanMccId}/googleAds:search`, {
+    const res = await fetch(`https://googleads.googleapis.com/v25/customers/${cleanMccId}/googleAds:search`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
