@@ -39,9 +39,23 @@ export async function GET() {
       body: JSON.stringify({ query }),
       cache: 'no-store',
     });
-    const body = await res.json();
+
+    const rawBody = await res.text();
+    let body: { results?: CustomerClientRow[]; error?: { message?: string; status?: string; details?: unknown } } = {};
+    try {
+      body = rawBody ? JSON.parse(rawBody) : {};
+    } catch (parseErr) {
+      console.error('MCC accounts: failed to parse Google Ads response as JSON', {
+        status: res.status,
+        mccId: cleanMccId,
+        rawBody: rawBody.slice(0, 500),
+        parseErr,
+      });
+      return NextResponse.json({ error: `Resposta inválida da API do Google Ads (status ${res.status}).` }, { status: 500 });
+    }
 
     if (!res.ok) {
+      console.error('MCC accounts: Google Ads API error', { status: res.status, mccId: cleanMccId, body });
       return NextResponse.json({ error: body?.error?.message || `Erro na API do Google Ads (${res.status})` }, { status: 400 });
     }
 
@@ -54,7 +68,9 @@ export async function GET() {
       }));
 
     return NextResponse.json({ accounts });
-  } catch {
-    return NextResponse.json({ error: 'Erro ao buscar contas da MCC.' }, { status: 500 });
+  } catch (err) {
+    console.error('MCC accounts: unexpected error', { mccId: cleanMccId, err });
+    const message = err instanceof Error ? err.message : 'Erro ao buscar contas da MCC.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
