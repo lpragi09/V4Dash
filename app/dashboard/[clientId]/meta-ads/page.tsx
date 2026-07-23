@@ -42,6 +42,22 @@ function fmtDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+function lastNDates(n: number): string[] {
+  const dates: string[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    dates.push(fmtDate(d));
+  }
+  return dates;
+}
+
+/** Preenche com 0 os dias sem retorno da API, pra série sempre ir até hoje. */
+function alignSeries(dates: string[], rows: { date: string; value: number }[]): { date: string; value: number }[] {
+  const map = new Map(rows.map((r) => [r.date, r.value]));
+  return dates.map((d) => ({ date: d, value: map.get(d) || 0 }));
+}
+
 /** Janela dos últimos 30 dias (incluindo hoje) e os 30 dias imediatamente anteriores. */
 function getPeriods() {
   const currentUntil = new Date();
@@ -158,14 +174,18 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
       if (dailySettled.status === 'fulfilled') {
         const dailyRows: MetaDailyInsight[] = dailySettled.value.data || [];
-        dailySpend = dailyRows.map((row) => ({
-          date: row.date_start,
-          value: parseFloat(row.spend || '0'),
-        }));
-        dailyLeads = dailyRows.map((row) => {
-          const leadAction = row.actions?.find((a) => a.action_type === 'lead');
-          return { date: row.date_start, value: leadAction ? parseInt(leadAction.value, 10) : 0 };
-        });
+        const dateRange = lastNDates(30);
+        dailySpend = alignSeries(
+          dateRange,
+          dailyRows.map((row) => ({ date: row.date_start, value: parseFloat(row.spend || '0') }))
+        );
+        dailyLeads = alignSeries(
+          dateRange,
+          dailyRows.map((row) => {
+            const leadAction = row.actions?.find((a) => a.action_type === 'lead');
+            return { date: row.date_start, value: leadAction ? parseInt(leadAction.value, 10) : 0 };
+          })
+        );
       } else {
         console.error('Error fetching daily Meta Ads series:', dailySettled.reason);
       }

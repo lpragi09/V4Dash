@@ -45,7 +45,7 @@ function unixToDate(unixSeconds: number): string {
  * sequência) — contas com milhares de leads levavam dezenas de segundos
  * fazendo uma requisição de cada vez e esperando a resposta antes da próxima.
  */
-async function fetchAllKommoLeads(domain: string, accessToken: string): Promise<KommoLead[]> {
+async function fetchAllKommoLeads(domain: string, accessToken: string, createdAfterUnix?: number): Promise<KommoLead[]> {
   const limit = 250;
   const batchSize = 5;
   const maxPages = 20;
@@ -57,7 +57,13 @@ async function fetchAllKommoLeads(domain: string, accessToken: string): Promise<
 
     const results = await Promise.all(
       pagesInBatch.map(async (p) => {
-        const res = await fetch(`https://${domain}/api/v4/leads?limit=${limit}&page=${p}`, {
+        const url = new URL(`https://${domain}/api/v4/leads`);
+        url.searchParams.set('limit', String(limit));
+        url.searchParams.set('page', String(p));
+        if (createdAfterUnix) {
+          url.searchParams.set('filter[created_at][from]', String(createdAfterUnix));
+        }
+        const res = await fetch(url.toString(), {
           headers: { Authorization: `Bearer ${accessToken}` },
           cache: 'no-store',
         });
@@ -131,7 +137,14 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
       let valorGanho = 0;
       let valorPipeline = 0;
 
-      const leads = await fetchAllKommoLeads(crmAccountId, accessToken);
+      // Totais são calculados sobre o histórico inteiro (paginação pode não
+      // alcançar os leads mais recentes se houver muito histórico), então os
+      // gráficos diários usam uma busca à parte, filtrada pelos últimos 30 dias,
+      // pra garantir que os dias recentes sempre apareçam.
+      const [leads, recentLeads] = await Promise.all([
+        fetchAllKommoLeads(crmAccountId, accessToken),
+        fetchAllKommoLeads(crmAccountId, accessToken, Math.floor(cutoff)),
+      ]);
 
       for (const lead of leads) {
         oportunidades += 1;
@@ -143,8 +156,9 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
         } else {
           valorPipeline += lead.price || 0;
         }
+      }
 
-        // Buckets diários (últimos 30 dias) para os gráficos
+      for (const lead of recentLeads) {
         if (lead.created_at && lead.created_at >= cutoff) {
           const day = unixToDate(lead.created_at);
           dailyLeadsCount.set(day, (dailyLeadsCount.get(day) || 0) + 1);
