@@ -8,20 +8,15 @@ import {
   Settings,
   Wallet,
   PiggyBank,
-  Ban
+  Ban,
+  Users
 } from 'lucide-react';
 import Link from 'next/link';
 import InfoTooltip from '@/components/InfoTooltip';
 import TrendChart from '@/components/TrendChart';
+import { aggregateCrmLeads, buildDailySeries, type KommoLeadSnapshot } from '@/lib/kommo-crm';
 
 export const dynamic = 'force-dynamic';
-
-interface KommoLead {
-  status_id: number;
-  price?: number;
-  created_at?: number;
-  closed_at?: number;
-}
 
 function lastNDates(n: number): string[] {
   const dates: string[] = [];
@@ -31,111 +26,6 @@ function lastNDates(n: number): string[] {
     dates.push(d.toISOString().slice(0, 10));
   }
   return dates;
-}
-
-function alignSeries(dates: string[], counts: Map<string, number>): { date: string; value: number }[] {
-  return dates.map((d) => ({ date: d, value: counts.get(d) || 0 }));
-}
-
-function unixToDate(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
-}
-
-/**
- * Busca todos os leads paginando em lotes paralelos (em vez de um por vez em
- * sequência) — contas com milhares de leads levavam dezenas de segundos
- * fazendo uma requisição de cada vez e esperando a resposta antes da próxima.
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchAllKommoLeads(domain: string, accessToken: string, createdAfterUnix?: number): Promise<KommoLead[]> {
-  const limit = 250;
-  const batchSize = 3;
-  const maxPages = 20;
-  const allLeads: KommoLead[] = [];
-  let page = 1;
-
-  while (page <= maxPages) {
-    const pagesInBatch = Array.from({ length: batchSize }, (_, i) => page + i).filter((p) => p <= maxPages);
-
-    const results = await Promise.all(
-      pagesInBatch.map(async (p) => {
-        const url = new URL(`https://${domain}/api/v4/leads`);
-        url.searchParams.set('limit', String(limit));
-        url.searchParams.set('page', String(p));
-        if (createdAfterUnix) {
-          url.searchParams.set('filter[created_at][from]', String(createdAfterUnix));
-        }
-
-        // Retry com backoff se o Kommo responder 429 (rate limit) —
-        // as buscas paralelas ocasionalmente estouram o limite por segundo da API.
-        let attempt = 0;
-        while (true) {
-          const res = await fetch(url.toString(), {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            cache: 'no-store',
-          });
-          if (res.status === 204) return [] as KommoLead[];
-          if (res.status === 429 && attempt < 5) {
-            const retryAfter = Number(res.headers.get('Retry-After')) || 2;
-            await sleep(retryAfter * 1000 * (attempt + 1));
-            attempt += 1;
-            continue;
-          }
-          if (!res.ok) {
-            const errBody = await res.json().catch(() => ({}) as Record<string, string>);
-            throw new Error(errBody.title || errBody.hint || `Erro ao buscar leads do Kommo (${res.status})`);
-          }
-          const json = await res.json();
-          return (json._embedded?.leads || []) as KommoLead[];
-        }
-      })
-    );
-
-    let hitEnd = false;
-    for (const leads of results) {
-      allLeads.push(...leads);
-      if (leads.length < limit) hitEnd = true;
-    }
-
-    page += batchSize;
-    if (hitEnd) break;
-  }
-
-  return allLeads;
-}
-
-/**
- * Estágios como "Não Fechou" são customizados por conta/funil — não têm um
- * status_id fixo como Ganho (142) e Perdido (143). Por isso identificamos
- * pelo nome do estágio em vez de um ID fixo, buscando em todos os funis da conta.
- */
-async function fetchNaoFechouStatusIds(domain: string, accessToken: string): Promise<Set<number>> {
-  try {
-    const res = await fetch(`https://${domain}/api/v4/leads/pipelines`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: 'no-store',
-    });
-    if (!res.ok) return new Set();
-    const json = await res.json();
-    const pipelines = json._embedded?.pipelines || [];
-    const normalize = (s: string) =>
-      s.toLowerCase().trim().replace(/ã/g, 'a').replace(/á/g, 'a').replace(/â/g, 'a').replace(/ç/g, 'c');
-    const ids = new Set<number>();
-    for (const pipeline of pipelines) {
-      const statuses = pipeline._embedded?.statuses || [];
-      for (const status of statuses) {
-        if (normalize(status.name || '') === 'nao fechou') {
-          ids.add(status.id);
-        }
-      }
-    }
-    return ids;
-  } catch {
-    return new Set();
-  }
 }
 
 export default async function CrmClientPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -150,7 +40,6 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
 
   if (clientError || !client) notFound();
 
-  // Busca a integração do CRM
   const { data: crmInt } = await supabase
     .from('integracoes_clientes')
     .select('*')
@@ -158,98 +47,56 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
     .eq('plataforma', 'crm')
     .single();
 
-  const crmAccountId = crmInt?.conta_id;
-  const accessToken = crmInt?.access_token;
+  const { data: snapshot } = await supabase
+    .from('crm_snapshots')
+    .select('*')
+    .eq('cliente_id', clientId)
+    .maybeSingle();
 
   let dashboardData = null;
   let fetchError = null;
+  let atualizadoEm: string | null = null;
   const dateRange = lastNDates(30);
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - 30);
-  const cutoff = cutoffDate.getTime() / 1000;
-  const dailyLeadsCount = new Map<string, number>();
-  const dailyWonValue = new Map<string, number>();
+  let dailyLeads: { date: string; value: number }[] = [];
+  let dailyWon: { date: string; value: number }[] = [];
 
-  if (!crmAccountId) {
-    fetchError = "Conta de CRM não vinculada a este cliente. Configure em Configurações Gerais.";
-  } else if (!accessToken) {
-    fetchError = "Token de Acesso do CRM não encontrado para este cliente.";
+  if (!crmInt?.conta_id || !crmInt?.access_token) {
+    fetchError = 'Conta de CRM não vinculada a este cliente. Configure em Configurações Gerais.';
+  } else if (!snapshot) {
+    fetchError = 'Ainda não há dados sincronizados desse CRM. A primeira sincronização roda logo após conectar — se acabou de conectar, aguarde alguns instantes e atualize a página.';
   } else {
-    const STATUS_GANHO = 142;
-    const STATUS_PERDIDO = 143;
+    const leads = (snapshot.leads || []) as KommoLeadSnapshot[];
+    const recentLeads = (snapshot.recent_leads || []) as KommoLeadSnapshot[];
+    const naoFechouIds = (snapshot.nao_fechou_ids || []) as number[];
 
-    try {
-      let oportunidades = 0;
-      let ganhas = 0;
-      let perdidas = 0;
-      let naoFechou = 0;
-      let valorGanho = 0;
-      let valorPipeline = 0;
-      let valorNaoFechou = 0;
-
-      // "Não Fechou" é um estágio customizado (não o status global de perdido),
-      // então esses leads ficam de fora tanto de "Ganho" quanto de "Pipeline" —
-      // não são negócio ganho, e não representam pipeline ativo/saudável.
-      const naoFechouIds = await fetchNaoFechouStatusIds(crmAccountId, accessToken);
-
-      // Totais são calculados sobre o histórico inteiro (paginação pode não
-      // alcançar os leads mais recentes se houver muito histórico), então os
-      // gráficos diários usam uma busca à parte, filtrada pelos últimos 30 dias,
-      // pra garantir que os dias recentes sempre apareçam. As duas buscas rodam
-      // em sequência (não em paralelo) pra não estourar o rate limit do Kommo,
-      // já que cada uma já dispara várias requisições simultâneas por conta própria.
-      const leads = await fetchAllKommoLeads(crmAccountId, accessToken);
-      const recentLeads = await fetchAllKommoLeads(crmAccountId, accessToken, Math.floor(cutoff));
-
-      for (const lead of leads) {
-        oportunidades += 1;
-        if (lead.status_id === STATUS_GANHO) {
-          ganhas += 1;
-          valorGanho += lead.price || 0;
-        } else if (lead.status_id === STATUS_PERDIDO) {
-          perdidas += 1;
-        } else if (naoFechouIds.has(lead.status_id)) {
-          naoFechou += 1;
-          valorNaoFechou += lead.price || 0;
-        } else {
-          valorPipeline += lead.price || 0;
-        }
-      }
-
-      for (const lead of recentLeads) {
-        if (lead.created_at && lead.created_at >= cutoff) {
-          const day = unixToDate(lead.created_at);
-          dailyLeadsCount.set(day, (dailyLeadsCount.get(day) || 0) + 1);
-        }
-        if (lead.status_id === STATUS_GANHO && lead.closed_at && lead.closed_at >= cutoff) {
-          const day = unixToDate(lead.closed_at);
-          dailyWonValue.set(day, (dailyWonValue.get(day) || 0) + (lead.price || 0));
-        }
-      }
-
-      dashboardData = { oportunidades, ganhas, perdidas, naoFechou, valorGanho, valorPipeline, valorNaoFechou };
-    } catch (err) {
-      dashboardData = null;
-      fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do CRM.";
-    }
+    dashboardData = aggregateCrmLeads(leads, naoFechouIds);
+    const series = buildDailySeries(recentLeads, dateRange);
+    dailyLeads = series.dailyLeads;
+    dailyWon = series.dailyWon;
+    atualizadoEm = snapshot.atualizado_em;
   }
-
-  const dailyLeads = alignSeries(dateRange, dailyLeadsCount);
-  const dailyWon = alignSeries(dateRange, dailyWonValue);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
+  const formatDateTime = (iso: string) =>
+    new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(iso));
+
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-500">
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-2xl bg-orange-500/10 flex items-center justify-center border border-orange-500/20">
-          <MessageSquare className="w-6 h-6 text-orange-500" />
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-orange-500/10 flex items-center justify-center border border-orange-500/20">
+            <MessageSquare className="w-6 h-6 text-orange-500" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-serif font-bold text-white mb-1">Integração CRM</h1>
+            <p className="text-zinc-400">Funil de Vendas de {client.nome}</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-3xl font-serif font-bold text-white mb-1">Integração CRM</h1>
-          <p className="text-zinc-400">Funil de Vendas de {client.nome}</p>
-        </div>
+        {atualizadoEm && (
+          <p className="text-xs text-zinc-500 shrink-0">Atualizado em {formatDateTime(atualizadoEm)}</p>
+        )}
       </div>
 
       {fetchError && (
@@ -261,7 +108,7 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
               <p className="text-red-200/70">{fetchError}</p>
             </div>
           </div>
-          {!crmAccountId && (
+          {!crmInt?.conta_id && (
              <Link href="/dashboard/settings" className="mt-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
                <Settings className="w-4 h-4" />
                Vincular Conta em Configurações
@@ -341,6 +188,19 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
               </h3>
               <p className="text-4xl font-bold text-amber-400 relative z-10">{formatCurrency(dashboardData.valorNaoFechou)}</p>
               <p className="text-sm text-zinc-500 mt-1 relative z-10">{dashboardData.naoFechou} leads</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative group">
+              <div className="absolute inset-0 rounded-2xl bg-blue-500/5 transition-colors group-hover:bg-blue-500/10" />
+              <h3 className="text-blue-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
+                <span className="flex items-center gap-1.5">
+                  Vendas
+                  <InfoTooltip text="Clientes únicos com pelo menos um lead ganho — diferente de 'Leads Ganhos', não duplica o mesmo cliente que teve mais de um negócio fechado." />
+                </span>
+                <Users className="w-5 h-5 text-blue-500/50" />
+              </h3>
+              <p className="text-4xl font-bold text-blue-400 relative z-10">{dashboardData.vendas}</p>
+              <p className="text-sm text-zinc-500 mt-1 relative z-10">clientes únicos</p>
             </div>
           </div>
 

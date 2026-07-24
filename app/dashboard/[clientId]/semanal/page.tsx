@@ -11,14 +11,10 @@ import {
 import TrendChart from '@/components/TrendChart';
 import { getValidAgencyGoogleToken } from '@/lib/google-agency';
 import { getValidAgencyMetaToken } from '@/lib/meta-agency';
+import { aggregateCrmLeads, type KommoLeadSnapshot } from '@/lib/kommo-crm';
 import InfoTooltip from '@/components/InfoTooltip';
 
 export const dynamic = 'force-dynamic';
-
-interface KommoLead {
-  status_id: number;
-  price?: number;
-}
 
 interface ChannelAggregate {
   gastos: number;
@@ -31,6 +27,7 @@ interface CrmAggregate {
   ganhas: number;
   perdidas: number;
   naoFechou: number;
+  vendas: number;
   valorGanho: number;
   valorNaoFechou: number;
 }
@@ -130,108 +127,21 @@ async function fetchGoogle(
 }
 
 /**
- * Busca todos os leads paginando em lotes paralelos (em vez de um por vez em
- * sequência) — contas com milhares de leads levavam dezenas de segundos
- * fazendo uma requisição de cada vez e esperando a resposta antes da próxima.
+ * O CRM não busca mais direto no Kommo aqui — lê o snapshot que o cron
+ * (/api/cron/sync-crm) já deixou pronto no Supabase uma vez por dia.
  */
-async function fetchAllKommoLeads(domain: string, accessToken: string, createdAfterUnix?: number): Promise<KommoLead[]> {
-  const limit = 250;
-  const batchSize = 5;
-  const maxPages = 20;
-  const allLeads: KommoLead[] = [];
-  let page = 1;
-
-  while (page <= maxPages) {
-    const pagesInBatch = Array.from({ length: batchSize }, (_, i) => page + i).filter((p) => p <= maxPages);
-
-    const results = await Promise.all(
-      pagesInBatch.map(async (p) => {
-        const url = new URL(`https://${domain}/api/v4/leads`);
-        url.searchParams.set('limit', String(limit));
-        url.searchParams.set('page', String(p));
-        if (createdAfterUnix) {
-          url.searchParams.set('filter[created_at][from]', String(createdAfterUnix));
-        }
-        const res = await fetch(url.toString(), {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          cache: 'no-store',
-        });
-        if (res.status === 204) return [] as KommoLead[];
-        if (!res.ok) throw new Error(`Erro ao buscar leads do Kommo (${res.status})`);
-        const json = await res.json();
-        return (json._embedded?.leads || []) as KommoLead[];
-      })
-    );
-
-    let hitEnd = false;
-    for (const leads of results) {
-      allLeads.push(...leads);
-      if (leads.length < limit) hitEnd = true;
-    }
-
-    page += batchSize;
-    if (hitEnd) break;
+function crmFromSnapshot(
+  snapshot: { recent_leads?: KommoLeadSnapshot[]; nao_fechou_ids?: number[] } | null,
+  days: number
+): CrmAggregate {
+  if (!snapshot) {
+    return { oportunidades: 0, ganhas: 0, perdidas: 0, naoFechou: 0, vendas: 0, valorGanho: 0, valorNaoFechou: 0 };
   }
-
-  return allLeads;
-}
-
-/**
- * "Não Fechou" é um estágio customizado por conta/funil (não o status global
- * de perdido) — identificamos pelo nome do estágio em vez de um ID fixo.
- */
-async function fetchNaoFechouStatusIds(domain: string, accessToken: string): Promise<Set<number>> {
-  try {
-    const res = await fetch(`https://${domain}/api/v4/leads/pipelines`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: 'no-store',
-    });
-    if (!res.ok) return new Set();
-    const json = await res.json();
-    const pipelines = json._embedded?.pipelines || [];
-    const normalize = (s: string) =>
-      s.toLowerCase().trim().replace(/ã/g, 'a').replace(/á/g, 'a').replace(/â/g, 'a').replace(/ç/g, 'c');
-    const ids = new Set<number>();
-    for (const pipeline of pipelines) {
-      const statuses = pipeline._embedded?.statuses || [];
-      for (const status of statuses) {
-        if (normalize(status.name || '') === 'nao fechou') {
-          ids.add(status.id);
-        }
-      }
-    }
-    return ids;
-  } catch {
-    return new Set();
-  }
-}
-
-async function fetchCrm(accessToken: string, contaId: string, days: number): Promise<CrmAggregate> {
-  const STATUS_GANHO = 142;
-  const STATUS_PERDIDO = 143;
-  const createdAfterDate = new Date();
-  createdAfterDate.setDate(createdAfterDate.getDate() - days);
-  const createdAfterUnix = Math.floor(createdAfterDate.getTime() / 1000);
-  const [naoFechouIds, leads] = await Promise.all([
-    fetchNaoFechouStatusIds(contaId, accessToken),
-    fetchAllKommoLeads(contaId, accessToken, createdAfterUnix),
-  ]);
-
-  let oportunidades = 0, ganhas = 0, perdidas = 0, naoFechou = 0, valorGanho = 0, valorNaoFechou = 0;
-  for (const lead of leads) {
-    oportunidades += 1;
-    if (lead.status_id === STATUS_GANHO) {
-      ganhas += 1;
-      valorGanho += lead.price || 0;
-    } else if (lead.status_id === STATUS_PERDIDO) {
-      perdidas += 1;
-    } else if (naoFechouIds.has(lead.status_id)) {
-      naoFechou += 1;
-      valorNaoFechou += lead.price || 0;
-    }
-  }
-
-  return { oportunidades, ganhas, perdidas, naoFechou, valorGanho, valorNaoFechou };
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  const cutoffUnix = Math.floor(cutoffDate.getTime() / 1000);
+  const agg = aggregateCrmLeads(snapshot.recent_leads || [], snapshot.nao_fechou_ids || [], cutoffUnix);
+  return { oportunidades: agg.oportunidades, ganhas: agg.ganhas, perdidas: agg.perdidas, naoFechou: agg.naoFechou, vendas: agg.vendas, valorGanho: agg.valorGanho, valorNaoFechou: agg.valorNaoFechou };
 }
 
 export default async function SemanalClientPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -264,22 +174,23 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
   const metaAccessToken = await getValidAgencyMetaToken(supabase);
 
   // Meta, Google e CRM são independentes entre si — buscados em paralelo,
-  // não um esperando o outro terminar.
-  const [metaResult, googleResult, crmResult] = await Promise.allSettled([
+  // não um esperando o outro terminar. O CRM lê o snapshot diário do Supabase
+  // em vez de bater direto no Kommo (ver lib/kommo-crm.ts).
+  const [metaResult, googleResult, crmSnapshotResult] = await Promise.allSettled([
     metaAccessToken && metaInt?.conta_id
       ? fetchMeta(metaAccessToken, metaInt.conta_id, dateRange)
       : Promise.reject(new Error('Meta Ads não configurado')),
     googleAccessToken && googleInt?.conta_id && developerToken
       ? fetchGoogle(googleAccessToken, googleInt.conta_id, developerToken, dateRange)
       : Promise.reject(new Error('Google Ads não configurado')),
-    crmInt?.access_token && crmInt?.conta_id
-      ? fetchCrm(crmInt.access_token, crmInt.conta_id, 7)
+    crmInt?.conta_id
+      ? supabase.from('crm_snapshots').select('recent_leads, nao_fechou_ids').eq('cliente_id', clientId).maybeSingle()
       : Promise.reject(new Error('CRM não configurado')),
   ]);
 
   if (metaResult.status === 'rejected') console.error('Error fetching Meta Ads:', metaResult.reason);
   if (googleResult.status === 'rejected') console.error('Error fetching Google Ads:', googleResult.reason);
-  if (crmResult.status === 'rejected') console.error('Error fetching Kommo CRM:', crmResult.reason);
+  if (crmSnapshotResult.status === 'rejected') console.error('Error fetching Kommo CRM snapshot:', crmSnapshotResult.reason);
 
   const metaData: ChannelAggregate = metaResult.status === 'fulfilled' ? metaResult.value.current : { gastos: 0, leads: 0, cpl: 0 };
   const metaDailySpend = metaResult.status === 'fulfilled' ? metaResult.value.daily : alignSeries(dateRange, []);
@@ -287,7 +198,8 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
   const googleData: ChannelAggregate = googleResult.status === 'fulfilled' ? googleResult.value.current : { gastos: 0, leads: 0, cpl: 0 };
   const googleDailySpend = googleResult.status === 'fulfilled' ? googleResult.value.daily : alignSeries(dateRange, []);
 
-  const crmData: CrmAggregate = crmResult.status === 'fulfilled' ? crmResult.value : { oportunidades: 0, ganhas: 0, perdidas: 0, naoFechou: 0, valorGanho: 0, valorNaoFechou: 0 };
+  const crmSnapshot = crmSnapshotResult.status === 'fulfilled' ? crmSnapshotResult.value.data : null;
+  const crmData: CrmAggregate = crmFromSnapshot(crmSnapshot as { recent_leads?: KommoLeadSnapshot[]; nao_fechou_ids?: number[] } | null, 7);
 
   // Aggregate Data
   const totalGastos = metaData.gastos + googleData.gastos;
@@ -462,6 +374,10 @@ export default async function SemanalClientPage({ params }: { params: Promise<{ 
                 <div className="bg-[#09090b] p-4 rounded-xl border border-[#27272a] flex justify-between items-center">
                   <span className="text-amber-500">Não Fechou</span>
                   <span className="text-amber-400 font-bold text-lg">{dashboardData.crm.naoFechou}</span>
+                </div>
+                <div className="bg-[#09090b] p-4 rounded-xl border border-[#27272a] flex justify-between items-center">
+                  <span className="text-blue-500">Vendas (clientes únicos)</span>
+                  <span className="text-blue-400 font-bold text-lg">{dashboardData.crm.vendas}</span>
                 </div>
               </div>
             </div>

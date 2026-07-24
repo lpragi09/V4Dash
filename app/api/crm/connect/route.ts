@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { syncClientCrmSnapshot } from '@/lib/kommo-crm';
 
 export async function POST(request: Request) {
   try {
@@ -95,6 +96,14 @@ export async function POST(request: Request) {
           refresh_token: refreshToken,
           configuracoes_extras: configExtras
         }]);
+    }
+
+    // Sincroniza na hora, pra não deixar o cliente sem dado até o cron diário rodar.
+    // Se falhar aqui, não impede a conexão — o cron de amanhã tenta de novo.
+    try {
+      await syncClientCrmSnapshot(supabase, clientId, fullDomain, accessToken);
+    } catch (syncError) {
+      console.error('Erro na sincronização inicial do CRM:', syncError);
     }
 
     return NextResponse.json({ success: true, domain: fullDomain });
