@@ -7,7 +7,8 @@ import {
   Briefcase,
   Settings,
   Wallet,
-  PiggyBank
+  PiggyBank,
+  Ban
 } from 'lucide-react';
 import Link from 'next/link';
 import InfoTooltip from '@/components/InfoTooltip';
@@ -106,6 +107,37 @@ async function fetchAllKommoLeads(domain: string, accessToken: string, createdAf
   return allLeads;
 }
 
+/**
+ * Estágios como "Não Fechou" são customizados por conta/funil — não têm um
+ * status_id fixo como Ganho (142) e Perdido (143). Por isso identificamos
+ * pelo nome do estágio em vez de um ID fixo, buscando em todos os funis da conta.
+ */
+async function fetchNaoFechouStatusIds(domain: string, accessToken: string): Promise<Set<number>> {
+  try {
+    const res = await fetch(`https://${domain}/api/v4/leads/pipelines`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) return new Set();
+    const json = await res.json();
+    const pipelines = json._embedded?.pipelines || [];
+    const normalize = (s: string) =>
+      s.toLowerCase().trim().replace(/ã/g, 'a').replace(/á/g, 'a').replace(/â/g, 'a').replace(/ç/g, 'c');
+    const ids = new Set<number>();
+    for (const pipeline of pipelines) {
+      const statuses = pipeline._embedded?.statuses || [];
+      for (const status of statuses) {
+        if (normalize(status.name || '') === 'nao fechou') {
+          ids.add(status.id);
+        }
+      }
+    }
+    return ids;
+  } catch {
+    return new Set();
+  }
+}
+
 export default async function CrmClientPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
   const supabase = await createClient();
@@ -150,8 +182,15 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
       let oportunidades = 0;
       let ganhas = 0;
       let perdidas = 0;
+      let naoFechou = 0;
       let valorGanho = 0;
       let valorPipeline = 0;
+      let valorNaoFechou = 0;
+
+      // "Não Fechou" é um estágio customizado (não o status global de perdido),
+      // então esses leads ficam de fora tanto de "Ganho" quanto de "Pipeline" —
+      // não são negócio ganho, e não representam pipeline ativo/saudável.
+      const naoFechouIds = await fetchNaoFechouStatusIds(crmAccountId, accessToken);
 
       // Totais são calculados sobre o histórico inteiro (paginação pode não
       // alcançar os leads mais recentes se houver muito histórico), então os
@@ -169,6 +208,9 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
           valorGanho += lead.price || 0;
         } else if (lead.status_id === STATUS_PERDIDO) {
           perdidas += 1;
+        } else if (naoFechouIds.has(lead.status_id)) {
+          naoFechou += 1;
+          valorNaoFechou += lead.price || 0;
         } else {
           valorPipeline += lead.price || 0;
         }
@@ -185,7 +227,7 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
         }
       }
 
-      dashboardData = { oportunidades, ganhas, perdidas, valorGanho, valorPipeline };
+      dashboardData = { oportunidades, ganhas, perdidas, naoFechou, valorGanho, valorPipeline, valorNaoFechou };
     } catch (err) {
       dashboardData = null;
       fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do CRM.";
@@ -281,11 +323,24 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   Valor em Pipeline
-                  <InfoTooltip text="Soma do valor dos negócios ainda em andamento (nem ganhos, nem perdidos)." />
+                  <InfoTooltip text="Soma do valor dos negócios ainda em andamento (nem ganhos, nem perdidos, nem no estágio 'Não Fechou')." />
                 </span>
                 <PiggyBank className="w-5 h-5 text-zinc-500" />
               </h3>
               <p className="text-4xl font-bold text-white mb-2">{formatCurrency(dashboardData.valorPipeline)}</p>
+            </div>
+
+            <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative group">
+              <div className="absolute inset-0 rounded-2xl bg-amber-500/5 transition-colors group-hover:bg-amber-500/10" />
+              <h3 className="text-amber-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
+                <span className="flex items-center gap-1.5">
+                  Não Fechou
+                  <InfoTooltip text="Negócios no estágio 'Não Fechou' do funil. Não contam como ganho nem como pipeline ativo — ficam à parte por não representarem receita nem oportunidade em andamento." />
+                </span>
+                <Ban className="w-5 h-5 text-amber-500/50" />
+              </h3>
+              <p className="text-4xl font-bold text-amber-400 relative z-10">{formatCurrency(dashboardData.valorNaoFechou)}</p>
+              <p className="text-sm text-zinc-500 mt-1 relative z-10">{dashboardData.naoFechou} leads</p>
             </div>
           </div>
 
