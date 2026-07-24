@@ -269,7 +269,7 @@ export default async function ClientOverviewPage({
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-500">
-      <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
+      <div className="flex flex-wrap items-center justify-between gap-4 relative z-30">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center border border-red-500/20">
             <LayoutDashboard className="w-6 h-6 text-red-500" />

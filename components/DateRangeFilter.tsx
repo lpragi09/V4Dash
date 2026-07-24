@@ -135,7 +135,7 @@ export default function DateRangeFilter() {
       )}
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 z-20 bg-[#18181b] border border-[#27272a] rounded-xl p-4 shadow-xl flex flex-col gap-3 w-64">
+        <div className="absolute top-full left-0 mt-2 z-50 bg-[#18181b] border border-[#27272a] rounded-xl p-4 shadow-xl flex flex-col gap-3 w-64">
           <div>
             <label className="block text-xs text-zinc-400 mb-1">De</label>
             <input
