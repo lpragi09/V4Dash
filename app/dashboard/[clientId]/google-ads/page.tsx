@@ -16,6 +16,8 @@ import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
 import ComparisonBadge from '@/components/ComparisonBadge';
 import { getValidAgencyGoogleToken } from '@/lib/google-agency';
+import { resolveDateRange, previousDateRange, datesInRange } from '@/lib/date-range';
+import DateRangeFilter from '@/components/DateRangeFilter';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,41 +36,10 @@ interface GoogleAggregate {
   cpcMedio: number;
 }
 
-function fmtDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function lastNDates(n: number): string[] {
-  const dates: string[] = [];
-  for (let i = n - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    dates.push(fmtDate(d));
-  }
-  return dates;
-}
-
 /** Preenche com 0 os dias sem retorno da API, pra série sempre ir até hoje. */
 function alignSeries(dates: string[], rows: { date: string; value: number }[]): { date: string; value: number }[] {
   const map = new Map(rows.map((r) => [r.date, r.value]));
   return dates.map((d) => ({ date: d, value: map.get(d) || 0 }));
-}
-
-/** Janela dos últimos 30 dias (incluindo hoje) e os 30 dias imediatamente anteriores. */
-function getPeriods() {
-  const currentUntil = new Date();
-  const currentSince = new Date();
-  currentSince.setDate(currentSince.getDate() - 29);
-
-  const previousUntil = new Date();
-  previousUntil.setDate(previousUntil.getDate() - 30);
-  const previousSince = new Date();
-  previousSince.setDate(previousSince.getDate() - 59);
-
-  return {
-    current: { since: fmtDate(currentSince), until: fmtDate(currentUntil) },
-    previous: { since: fmtDate(previousSince), until: fmtDate(previousUntil) },
-  };
 }
 
 async function fetchGoogleAggregate(
@@ -105,8 +76,15 @@ async function fetchGoogleAggregate(
   };
 }
 
-export default async function GoogleAdsClientPage({ params }: { params: Promise<{ clientId: string }> }) {
+export default async function GoogleAdsClientPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ clientId: string }>;
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
   const { clientId } = await params;
+  const resolvedSearchParams = await searchParams;
   const supabase = await createClient();
 
   const { data: client, error: clientError } = await supabase
@@ -153,7 +131,8 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
         headers['login-customer-id'] = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace(/-/g, '');
       }
 
-      const { current, previous } = getPeriods();
+      const current = resolveDateRange(resolvedSearchParams, 30);
+      const previous = previousDateRange(current);
       const dailyQuery = `SELECT segments.date, metrics.clicks, metrics.cost_micros FROM customer WHERE segments.date BETWEEN '${current.since}' AND '${current.until}' ORDER BY segments.date ASC`;
 
       // Período atual, período anterior e série diária são independentes —
@@ -183,7 +162,7 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
 
       if (dailySettled.status === 'fulfilled') {
         const dailyRows: GoogleDailyRow[] = dailySettled.value.results || [];
-        const dateRange = lastNDates(30);
+        const dateRange = datesInRange(current);
         const validRows = dailyRows.filter((row) => row.segments?.date);
         dailySpend = alignSeries(
           dateRange,
@@ -208,14 +187,17 @@ export default async function GoogleAdsClientPage({ params }: { params: Promise<
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-500">
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
-          <Search className="w-6 h-6 text-emerald-500" />
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+            <Search className="w-6 h-6 text-emerald-500" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-serif font-bold text-white mb-1">Integração Google Ads</h1>
+            <p className="text-zinc-400">Desempenho de campanhas de {client.nome}</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-3xl font-serif font-bold text-white mb-1">Integração Google Ads</h1>
-          <p className="text-zinc-400">Desempenho de campanhas de {client.nome}</p>
-        </div>
+        <DateRangeFilter />
       </div>
 
       {fetchError && (

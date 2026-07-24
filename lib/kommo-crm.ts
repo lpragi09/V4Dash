@@ -180,7 +180,8 @@ export async function syncClientCrmSnapshot(
 export function aggregateCrmLeads(
   leads: KommoLeadSnapshot[],
   naoFechouIds: number[],
-  createdAfterUnix?: number
+  createdAfterUnix?: number,
+  createdBeforeUnix?: number
 ): CrmAggregate {
   const naoFechouSet = new Set(naoFechouIds);
   const clientesGanhos = new Set<number>();
@@ -189,6 +190,7 @@ export function aggregateCrmLeads(
 
   for (const lead of leads) {
     if (createdAfterUnix && (!lead.created_at || lead.created_at < createdAfterUnix)) continue;
+    if (createdBeforeUnix && (!lead.created_at || lead.created_at > createdBeforeUnix)) continue;
     oportunidades += 1;
     if (lead.status_id === STATUS_GANHO) {
       ganhas += 1;

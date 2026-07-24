@@ -17,6 +17,8 @@ import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
 import ComparisonBadge from '@/components/ComparisonBadge';
 import { getValidAgencyMetaToken } from '@/lib/meta-agency';
+import { resolveDateRange, previousDateRange, datesInRange } from '@/lib/date-range';
+import DateRangeFilter from '@/components/DateRangeFilter';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,41 +40,10 @@ interface MetaAggregate {
   cpm: number;
 }
 
-function fmtDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function lastNDates(n: number): string[] {
-  const dates: string[] = [];
-  for (let i = n - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    dates.push(fmtDate(d));
-  }
-  return dates;
-}
-
 /** Preenche com 0 os dias sem retorno da API, pra série sempre ir até hoje. */
 function alignSeries(dates: string[], rows: { date: string; value: number }[]): { date: string; value: number }[] {
   const map = new Map(rows.map((r) => [r.date, r.value]));
   return dates.map((d) => ({ date: d, value: map.get(d) || 0 }));
-}
-
-/** Janela dos últimos 30 dias (incluindo hoje) e os 30 dias imediatamente anteriores. */
-function getPeriods() {
-  const currentUntil = new Date();
-  const currentSince = new Date();
-  currentSince.setDate(currentSince.getDate() - 29);
-
-  const previousUntil = new Date();
-  previousUntil.setDate(previousUntil.getDate() - 30);
-  const previousSince = new Date();
-  previousSince.setDate(previousSince.getDate() - 59);
-
-  return {
-    current: { since: fmtDate(currentSince), until: fmtDate(currentUntil) },
-    previous: { since: fmtDate(previousSince), until: fmtDate(previousUntil) },
-  };
 }
 
 async function fetchMetaAggregate(
@@ -113,8 +84,15 @@ async function fetchMetaAggregate(
   };
 }
 
-export default async function MetaAdsClientPage({ params }: { params: Promise<{ clientId: string }> }) {
+export default async function MetaAdsClientPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ clientId: string }>;
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
   const { clientId } = await params;
+  const resolvedSearchParams = await searchParams;
   const supabase = await createClient();
 
   const { data: client, error: clientError } = await supabase
@@ -149,8 +127,10 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
   } else {
     try {
       const normalizedAccountId = metaAccountId.startsWith('act_') ? metaAccountId : `act_${metaAccountId}`;
-      const { current, previous } = getPeriods();
-      const dailyUrl = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&time_increment=1&fields=spend,actions`;
+      const current = resolveDateRange(resolvedSearchParams, 30);
+      const previous = previousDateRange(current);
+      const currentTimeRange = encodeURIComponent(JSON.stringify(current));
+      const dailyUrl = `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&time_range=${currentTimeRange}&time_increment=1&fields=spend,actions`;
 
       // Período atual, período anterior e série diária são independentes —
       // buscados em paralelo em vez de um esperar o outro terminar.
@@ -174,7 +154,7 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
       if (dailySettled.status === 'fulfilled') {
         const dailyRows: MetaDailyInsight[] = dailySettled.value.data || [];
-        const dateRange = lastNDates(30);
+        const dateRange = datesInRange(current);
         dailySpend = alignSeries(
           dateRange,
           dailyRows.map((row) => ({ date: row.date_start, value: parseFloat(row.spend || '0') }))
@@ -201,14 +181,17 @@ export default async function MetaAdsClientPage({ params }: { params: Promise<{ 
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-500">
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
-          <Activity className="w-6 h-6 text-blue-500" />
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
+            <Activity className="w-6 h-6 text-blue-500" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-serif font-bold text-white mb-1">Integração Meta Ads</h1>
+            <p className="text-zinc-400">Desempenho de campanhas de {client.nome}</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-3xl font-serif font-bold text-white mb-1">Integração Meta Ads</h1>
-          <p className="text-zinc-400">Desempenho de campanhas de {client.nome} (Últimos 30 dias)</p>
-        </div>
+        <DateRangeFilter />
       </div>
 
       {fetchError && (

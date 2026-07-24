@@ -14,6 +14,8 @@ import ComparisonBadge from '@/components/ComparisonBadge';
 import { getValidAgencyGoogleToken } from '@/lib/google-agency';
 import { getValidAgencyMetaToken } from '@/lib/meta-agency';
 import { aggregateCrmLeads, type KommoLeadSnapshot } from '@/lib/kommo-crm';
+import { resolveDateRange, previousDateRange, datesInRange, rangeToUnix, type DateRange } from '@/lib/date-range';
+import DateRangeFilter from '@/components/DateRangeFilter';
 
 // Force dynamic since it depends on params
 export const dynamic = 'force-dynamic';
@@ -34,47 +36,29 @@ interface CrmAggregate {
   valorNaoFechou: number;
 }
 
-function lastNDates(n: number): string[] {
-  const dates: string[] = [];
-  for (let i = n - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().slice(0, 10));
-  }
-  return dates;
-}
-
 function alignSeries(dates: string[], rows: { date: string; value: number }[]): { date: string; value: number }[] {
   const map = new Map(rows.map((r) => [r.date, r.value]));
   return dates.map((d) => ({ date: d, value: map.get(d) || 0 }));
-}
-
-/** Os 30 dias imediatamente anteriores à janela atual (últimos 30 dias), pra comparação mês a mês. */
-function previousPeriodRange(): { since: string; until: string } {
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  const until = new Date();
-  until.setDate(until.getDate() - 30);
-  const since = new Date();
-  since.setDate(since.getDate() - 59);
-  return { since: fmt(since), until: fmt(until) };
 }
 
 async function fetchMeta(
   accessToken: string,
   contaId: string,
   dateRange: string[],
-  previousRange: { since: string; until: string }
+  currentRange: DateRange,
+  previousRange: DateRange
 ): Promise<{ current: ChannelAggregate; daily: { date: string; value: number }[]; previous: ChannelAggregate }> {
   const normalizedAccountId = contaId.startsWith('act_') ? contaId : `act_${contaId}`;
-  const prevTimeRange = encodeURIComponent(JSON.stringify(previousRange));
+  const currentTimeRange = encodeURIComponent(JSON.stringify({ since: currentRange.since, until: currentRange.until }));
+  const prevTimeRange = encodeURIComponent(JSON.stringify({ since: previousRange.since, until: previousRange.until }));
 
   const [currentJson, dailyJson, prevJson] = await Promise.all([
     fetch(
-      `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&fields=spend,actions`,
+      `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&time_range=${currentTimeRange}&fields=spend,actions`,
       { cache: 'no-store' }
     ).then((r) => r.json()),
     fetch(
-      `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&date_preset=last_30d&time_increment=1&fields=spend`,
+      `https://graph.facebook.com/v19.0/${normalizedAccountId}/insights?access_token=${accessToken}&time_range=${currentTimeRange}&time_increment=1&fields=spend`,
       { cache: 'no-store' }
     ).then((r) => r.json()),
     fetch(
@@ -108,7 +92,8 @@ async function fetchGoogle(
   contaId: string,
   developerToken: string,
   dateRange: string[],
-  previousRange: { since: string; until: string }
+  currentRange: DateRange,
+  previousRange: DateRange
 ): Promise<{ current: ChannelAggregate; daily: { date: string; value: number }[]; previous: ChannelAggregate }> {
   const customerId = contaId.replace(/-/g, '');
   const headers: Record<string, string> = {
@@ -129,8 +114,8 @@ async function fetchGoogle(
     }).then((r) => r.json());
 
   const [currentBody, dailyBody, prevBody] = await Promise.all([
-    search(`SELECT metrics.clicks, metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date DURING LAST_30_DAYS`),
-    search(`SELECT segments.date, metrics.cost_micros FROM customer WHERE segments.date DURING LAST_30_DAYS ORDER BY segments.date ASC`),
+    search(`SELECT metrics.clicks, metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date BETWEEN '${currentRange.since}' AND '${currentRange.until}'`),
+    search(`SELECT segments.date, metrics.cost_micros FROM customer WHERE segments.date BETWEEN '${currentRange.since}' AND '${currentRange.until}' ORDER BY segments.date ASC`),
     search(`SELECT metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date BETWEEN '${previousRange.since}' AND '${previousRange.until}'`),
   ]);
 
@@ -152,25 +137,36 @@ async function fetchGoogle(
   return { current: parseAggregate(currentBody), daily, previous: parseAggregate(prevBody) };
 }
 
+type CrmSnapshotRow = { leads?: KommoLeadSnapshot[]; recent_leads?: KommoLeadSnapshot[]; nao_fechou_ids?: number[] };
+
 /**
  * O CRM não busca mais direto no Kommo aqui — lê o snapshot que o cron
  * (/api/cron/sync-crm) já deixou pronto no Supabase uma vez por dia.
+ *
+ * "recent_leads" (últimos ~31 dias) é sempre completo, buscado com filtro na
+ * própria API do Kommo — usamos ele quando o período pedido cabe dentro dessa
+ * janela. Períodos mais antigos usam "leads" (histórico inteiro, mas truncado
+ * pelo teto de paginação em contas com muito volume).
  */
-function crmFromSnapshot(
-  snapshot: { recent_leads?: KommoLeadSnapshot[]; nao_fechou_ids?: number[] } | null,
-  days: number
-): CrmAggregate {
+function crmFromSnapshot(snapshot: CrmSnapshotRow | null, range: DateRange): CrmAggregate {
   if (!snapshot) {
     return { oportunidades: 0, ganhas: 0, perdidas: 0, naoFechou: 0, vendas: 0, valorGanho: 0, valorNaoFechou: 0 };
   }
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - days);
-  const cutoffUnix = Math.floor(cutoffDate.getTime() / 1000);
-  const agg = aggregateCrmLeads(snapshot.recent_leads || [], snapshot.nao_fechou_ids || [], cutoffUnix);
+  const { fromUnix, toUnix } = rangeToUnix(range);
+  const recentWindowStart = Math.floor(Date.now() / 1000) - 31 * 86_400;
+  const source = fromUnix >= recentWindowStart ? snapshot.recent_leads : snapshot.leads;
+  const agg = aggregateCrmLeads(source || [], snapshot.nao_fechou_ids || [], fromUnix, toUnix);
   return { oportunidades: agg.oportunidades, ganhas: agg.ganhas, perdidas: agg.perdidas, naoFechou: agg.naoFechou, vendas: agg.vendas, valorGanho: agg.valorGanho, valorNaoFechou: agg.valorNaoFechou };
 }
 
-export default async function ClientOverviewPage({ params }: { params: Promise<{ clientId: string }> }) {
+export default async function ClientOverviewPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ clientId: string }>;
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
+  const resolvedSearchParams = await searchParams;
   const { clientId } = await params;
   const supabase = await createClient();
 
@@ -201,8 +197,9 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   const googleInt = integrations?.find(i => i.plataforma === 'google_ads');
   const crmInt = integrations?.find(i => i.plataforma === 'crm');
 
-  const dateRange = lastNDates(30);
-  const previousRange = previousPeriodRange();
+  const currentRange = resolveDateRange(resolvedSearchParams, 30);
+  const previousRange = previousDateRange(currentRange);
+  const dateRange = datesInRange(currentRange);
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
   const googleAccessToken = await getValidAgencyGoogleToken(supabase);
   const metaAccessToken = await getValidAgencyMetaToken(supabase);
@@ -213,13 +210,13 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   // já deixou pronto no Supabase (ver lib/kommo-crm.ts).
   const [metaResult, googleResult, crmSnapshotResult] = await Promise.allSettled([
     metaAccessToken && metaInt?.conta_id
-      ? fetchMeta(metaAccessToken, metaInt.conta_id, dateRange, previousRange)
+      ? fetchMeta(metaAccessToken, metaInt.conta_id, dateRange, currentRange, previousRange)
       : Promise.reject(new Error('Meta Ads não configurado')),
     googleAccessToken && googleInt?.conta_id && developerToken
-      ? fetchGoogle(googleAccessToken, googleInt.conta_id, developerToken, dateRange, previousRange)
+      ? fetchGoogle(googleAccessToken, googleInt.conta_id, developerToken, dateRange, currentRange, previousRange)
       : Promise.reject(new Error('Google Ads não configurado')),
     crmInt?.conta_id
-      ? supabase.from('crm_snapshots').select('recent_leads, nao_fechou_ids').eq('cliente_id', clientId).maybeSingle()
+      ? supabase.from('crm_snapshots').select('leads, recent_leads, nao_fechou_ids').eq('cliente_id', clientId).maybeSingle()
       : Promise.reject(new Error('CRM não configurado')),
   ]);
 
@@ -236,7 +233,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   const googleDailySpend = googleResult.status === 'fulfilled' ? googleResult.value.daily : alignSeries(dateRange, []);
 
   const crmSnapshot = crmSnapshotResult.status === 'fulfilled' ? crmSnapshotResult.value.data : null;
-  const crmData: CrmAggregate = crmFromSnapshot(crmSnapshot as { recent_leads?: KommoLeadSnapshot[]; nao_fechou_ids?: number[] } | null, 30);
+  const crmData: CrmAggregate = crmFromSnapshot(crmSnapshot as CrmSnapshotRow | null, currentRange);
 
   // Aggregate Data
   const totalGastos = metaData.gastos + googleData.gastos;
@@ -272,14 +269,17 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-500">
-      <div className="flex items-center gap-4 relative z-10">
-        <div className="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center border border-red-500/20">
-          <LayoutDashboard className="w-6 h-6 text-red-500" />
+      <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center border border-red-500/20">
+            <LayoutDashboard className="w-6 h-6 text-red-500" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-serif font-bold text-white mb-1">{client.nome}</h1>
+            <p className="text-zinc-400">Acomp. Mensal</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-3xl font-serif font-bold text-white mb-1">{client.nome}</h1>
-          <p className="text-zinc-400">Acomp. Mensal</p>
-        </div>
+        <DateRangeFilter />
       </div>
 
       {fetchError && (
