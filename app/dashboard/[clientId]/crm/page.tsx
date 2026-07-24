@@ -288,8 +288,8 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
               <div className="absolute inset-0 rounded-2xl bg-emerald-500/5 transition-colors group-hover:bg-emerald-500/10" />
               <h3 className="text-emerald-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
                 <span className="flex items-center gap-1.5">
-                  Vendas Ganhas
-                  <InfoTooltip text="Negócios marcados como ganhos (venda concluída) no período." />
+                  Leads Ganhos
+                  <InfoTooltip text="Leads/negócios marcados como ganhos no funil do CRM. Não corresponde necessariamente ao número de vendas únicas — um mesmo cliente pode gerar mais de um lead ganho." />
                 </span>
                 <TrendingUp className="w-5 h-5 text-emerald-500/50" />
               </h3>
@@ -311,8 +311,8 @@ export default async function CrmClientPage({ params }: { params: Promise<{ clie
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
-                  Valor Ganho
-                  <InfoTooltip text="Soma do valor de todos os negócios marcados como ganhos." />
+                  Valor dos Leads Ganhos
+                  <InfoTooltip text="Soma do valor de todos os leads marcados como ganhos no funil. É o valor dos negócios ganhos no CRM, não uma contagem auditada de vendas — um mesmo cliente pode ter mais de um lead ganho." />
                 </span>
                 <Wallet className="w-5 h-5 text-zinc-500" />
               </h3>

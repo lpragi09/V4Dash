@@ -17,7 +17,7 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: 'Sistema ADM | Dashboard Premium',
+  title: 'Sistemas | Dashboard',
   description: 'Acompanhe seus resultados de Meta Ads, Google Ads e CRM.',
 };
 

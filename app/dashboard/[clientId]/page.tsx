@@ -32,7 +32,9 @@ interface CrmAggregate {
   oportunidades: number;
   ganhas: number;
   perdidas: number;
+  naoFechou: number;
   valorGanho: number;
+  valorNaoFechou: number;
 }
 
 function lastNDates(n: number): string[] {
@@ -200,15 +202,48 @@ async function fetchAllKommoLeads(domain: string, accessToken: string, createdAf
   return allLeads;
 }
 
+/**
+ * "Não Fechou" é um estágio customizado por conta/funil (não o status global
+ * de perdido) — identificamos pelo nome do estágio em vez de um ID fixo.
+ */
+async function fetchNaoFechouStatusIds(domain: string, accessToken: string): Promise<Set<number>> {
+  try {
+    const res = await fetch(`https://${domain}/api/v4/leads/pipelines`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) return new Set();
+    const json = await res.json();
+    const pipelines = json._embedded?.pipelines || [];
+    const normalize = (s: string) =>
+      s.toLowerCase().trim().replace(/ã/g, 'a').replace(/á/g, 'a').replace(/â/g, 'a').replace(/ç/g, 'c');
+    const ids = new Set<number>();
+    for (const pipeline of pipelines) {
+      const statuses = pipeline._embedded?.statuses || [];
+      for (const status of statuses) {
+        if (normalize(status.name || '') === 'nao fechou') {
+          ids.add(status.id);
+        }
+      }
+    }
+    return ids;
+  } catch {
+    return new Set();
+  }
+}
+
 async function fetchCrm(accessToken: string, contaId: string, days: number): Promise<CrmAggregate> {
   const STATUS_GANHO = 142;
   const STATUS_PERDIDO = 143;
   const createdAfterDate = new Date();
   createdAfterDate.setDate(createdAfterDate.getDate() - days);
   const createdAfterUnix = Math.floor(createdAfterDate.getTime() / 1000);
-  const leads = await fetchAllKommoLeads(contaId, accessToken, createdAfterUnix);
+  const [naoFechouIds, leads] = await Promise.all([
+    fetchNaoFechouStatusIds(contaId, accessToken),
+    fetchAllKommoLeads(contaId, accessToken, createdAfterUnix),
+  ]);
 
-  let oportunidades = 0, ganhas = 0, perdidas = 0, valorGanho = 0;
+  let oportunidades = 0, ganhas = 0, perdidas = 0, naoFechou = 0, valorGanho = 0, valorNaoFechou = 0;
   for (const lead of leads) {
     oportunidades += 1;
     if (lead.status_id === STATUS_GANHO) {
@@ -216,10 +251,13 @@ async function fetchCrm(accessToken: string, contaId: string, days: number): Pro
       valorGanho += lead.price || 0;
     } else if (lead.status_id === STATUS_PERDIDO) {
       perdidas += 1;
+    } else if (naoFechouIds.has(lead.status_id)) {
+      naoFechou += 1;
+      valorNaoFechou += lead.price || 0;
     }
   }
 
-  return { oportunidades, ganhas, perdidas, valorGanho };
+  return { oportunidades, ganhas, perdidas, naoFechou, valorGanho, valorNaoFechou };
 }
 
 export default async function ClientOverviewPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -285,7 +323,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   const googlePrevData: ChannelAggregate = googleResult.status === 'fulfilled' ? googleResult.value.previous : { gastos: 0, leads: 0, cpl: 0 };
   const googleDailySpend = googleResult.status === 'fulfilled' ? googleResult.value.daily : alignSeries(dateRange, []);
 
-  const crmData: CrmAggregate = crmResult.status === 'fulfilled' ? crmResult.value : { oportunidades: 0, ganhas: 0, perdidas: 0, valorGanho: 0 };
+  const crmData: CrmAggregate = crmResult.status === 'fulfilled' ? crmResult.value : { oportunidades: 0, ganhas: 0, perdidas: 0, naoFechou: 0, valorGanho: 0, valorNaoFechou: 0 };
 
   // Aggregate Data
   const totalGastos = metaData.gastos + googleData.gastos;
@@ -349,7 +387,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-zinc-400 font-medium flex items-center gap-1.5">
                 Receita CRM
-                <InfoTooltip text="Soma do valor dos negócios ganhos no Kommo no período." />
+                <InfoTooltip text="Soma do valor dos leads marcados como ganhos no Kommo no período — não é uma contagem auditada de vendas únicas, um mesmo cliente pode gerar mais de um lead ganho." />
               </h3>
               <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center">
                 <DollarSign className="w-5 h-5 text-emerald-500" />
@@ -479,13 +517,18 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
               </div>
 
               <div className="bg-[#09090b] p-4 rounded-xl border border-[#27272a] flex justify-between items-center">
-                <span className="text-emerald-500">Vendas Ganhas</span>
+                <span className="text-emerald-500">Leads Ganhos</span>
                 <span className="text-emerald-400 font-bold text-lg">{dashboardData.crm.ganhas}</span>
               </div>
 
               <div className="bg-[#09090b] p-4 rounded-xl border border-[#27272a] flex justify-between items-center">
                 <span className="text-red-500">Oportunidades Perdidas</span>
                 <span className="text-red-400 font-bold text-lg">{dashboardData.crm.perdidas}</span>
+              </div>
+
+              <div className="bg-[#09090b] p-4 rounded-xl border border-[#27272a] flex justify-between items-center">
+                <span className="text-amber-500">Não Fechou</span>
+                <span className="text-amber-400 font-bold text-lg">{dashboardData.crm.naoFechou}</span>
               </div>
 
             </div>
