@@ -82,7 +82,7 @@ function SettingsContent() {
           integrationId: kommoIntegrationId,
           secretKey: kommoSecretKey,
           authCode: kommoAuthCode,
-          redirectUri: window.location.origin
+          redirectUri: process.env.NEXT_PUBLIC_APP_URL
         })
       });
       const data = await res.json();
@@ -716,7 +716,7 @@ function SettingsContent() {
               {isConnectingKommo ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Conectar ao Kommo'}
             </button>
             <p className="text-xs text-zinc-500 text-center">
-              Crie a integração no Kommo em Configurações &gt; Integrações &gt; Criar Integração Privada. Use <strong>{typeof window !== 'undefined' ? window.location.origin : 'esta URL'}</strong> como Redirect URI.
+              Crie a integração no Kommo em Configurações &gt; Integrações &gt; Criar Integração Privada. Use <strong>{process.env.NEXT_PUBLIC_APP_URL || 'a URL configurada em NEXT_PUBLIC_APP_URL'}</strong> como Redirect URI.
             </p>
           </form>
         </Modal>

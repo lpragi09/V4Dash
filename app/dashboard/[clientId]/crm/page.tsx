@@ -51,7 +51,7 @@ function sleep(ms: number): Promise<void> {
 
 async function fetchAllKommoLeads(domain: string, accessToken: string, createdAfterUnix?: number): Promise<KommoLead[]> {
   const limit = 250;
-  const batchSize = 5;
+  const batchSize = 3;
   const maxPages = 20;
   const allLeads: KommoLead[] = [];
   let page = 1;
@@ -77,8 +77,8 @@ async function fetchAllKommoLeads(domain: string, accessToken: string, createdAf
             cache: 'no-store',
           });
           if (res.status === 204) return [] as KommoLead[];
-          if (res.status === 429 && attempt < 3) {
-            const retryAfter = Number(res.headers.get('Retry-After')) || 1;
+          if (res.status === 429 && attempt < 5) {
+            const retryAfter = Number(res.headers.get('Retry-After')) || 2;
             await sleep(retryAfter * 1000 * (attempt + 1));
             attempt += 1;
             continue;

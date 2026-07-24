@@ -4,10 +4,19 @@ import { createClient } from '@/utils/supabase/server';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { clientId, subdomain, integrationId, secretKey, authCode, redirectUri } = body;
+    const { clientId, subdomain, integrationId, secretKey, authCode } = body;
 
     if (!clientId || !subdomain || !integrationId || !secretKey || !authCode) {
       return NextResponse.json({ error: 'Faltam parâmetros obrigatórios.' }, { status: 400 });
+    }
+
+    // Redirect URI é sempre o domínio oficial fixo, nunca a origem de quem chamou —
+    // o Kommo só aceita uma única URI cadastrada por integração, então usar a URL
+    // atual do navegador (preview da Vercel, domínio antigo, etc.) causava falhas
+    // intermitentes por não bater com o que está cadastrado lá.
+    const redirectUri = process.env.NEXT_PUBLIC_APP_URL;
+    if (!redirectUri) {
+      return NextResponse.json({ error: 'NEXT_PUBLIC_APP_URL não configurada no servidor.' }, { status: 500 });
     }
 
     // Clean subdomain just in case user inputs full URL
