@@ -224,7 +224,12 @@ async function fetchMetaDemographics(
       leads: findActionValue(row.actions, 'lead'),
     }))
     .filter((row) => row.gastos >= 1)
-    .sort((a, b) => b.gastos - a.gastos);
+    .sort((a, b) => {
+      const ageA = parseInt(a.faixaEtaria, 10);
+      const ageB = parseInt(b.faixaEtaria, 10);
+      if (ageA !== ageB) return ageA - ageB;
+      return a.genero.localeCompare(b.genero);
+    });
 }
 
 async function fetchMetaPlatforms(
@@ -263,7 +268,8 @@ async function fetchMetaRegions(
   const bySigla = new Map<string, MetaRegionRow>();
 
   for (const row of rows) {
-    if (!row.region) continue;
+    // "Unknown" é ruído de atribuição do Meta (não dá pra localizar o estado), sem valor pro relatório.
+    if (!row.region || row.region.toLowerCase() === 'unknown') continue;
     const gastos = parseFloat(row.spend || '0');
     const leads = findActionValue(row.actions, 'lead');
     const match = findBrazilStateByName(row.region);
