@@ -767,7 +767,7 @@ export default async function MetaAdsClientPage({
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
                 <BrazilMap
                   data={Object.fromEntries(regions.filter((r) => r.sigla).map((r) => [r.sigla as string, r.gastos]))}
-                  format={formatCurrency}
+                  format="currency"
                   accentColor="#3b82f6"
                 />
                 <DataTable

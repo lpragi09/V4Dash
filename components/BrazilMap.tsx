@@ -5,13 +5,22 @@ import { BRAZIL_STATE_PATHS, BRAZIL_MAP_VIEWBOX } from '@/lib/brazil-states';
 interface BrazilMapProps {
   /** Valor por sigla de estado (ex: { SP: 1234.5, MG: 987.2 }). */
   data: Record<string, number>;
-  format: (value: number) => string;
+  /** Formato do valor no tooltip ao passar o mouse — 'currency' ou 'number'. */
+  format?: 'currency' | 'number';
   /** Cor de destaque em hex, ex: '#3b82f6' (azul, usado no Meta Ads). */
   accentColor?: string;
 }
 
+// Funções não podem ser passadas de Server Component pra Client Component —
+// por isso o formato é uma string ('currency'/'number') e a formatação
+// acontece aqui dentro, não recebida como prop.
+const formatValue = (value: number, format: 'currency' | 'number'): string =>
+  format === 'currency'
+    ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
+    : new Intl.NumberFormat('pt-BR').format(value);
+
 /** Mapa coroplético do Brasil — cor mais forte = valor maior. Estados sem dado ficam cinza neutro. */
-export default function BrazilMap({ data, format, accentColor = '#3b82f6' }: BrazilMapProps) {
+export default function BrazilMap({ data, format = 'currency', accentColor = '#3b82f6' }: BrazilMapProps) {
   const values = Object.values(data).filter((v) => v > 0);
   const max = values.length > 0 ? Math.max(...values) : 0;
 
@@ -34,7 +43,7 @@ export default function BrazilMap({ data, format, accentColor = '#3b82f6' }: Bra
             className="transition-opacity hover:opacity-80"
           >
             <title>
-              {state.name}: {format(value)}
+              {state.name}: {formatValue(value, format)}
             </title>
           </path>
         );
