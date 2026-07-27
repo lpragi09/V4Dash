@@ -145,7 +145,7 @@ async function fetchGoogleCampaigns(
   headers: Record<string, string>,
   range: { since: string; until: string }
 ): Promise<GoogleCampaignRow[]> {
-  const query = `SELECT campaign.id, campaign.name, campaign.status, metrics.cost_micros, metrics.clicks, metrics.conversions, metrics.ctr FROM campaign WHERE segments.date BETWEEN '${range.since}' AND '${range.until}' ORDER BY metrics.cost_micros DESC`;
+  const query = `SELECT campaign.id, campaign.name, campaign.status, metrics.cost_micros, metrics.clicks, metrics.conversions, metrics.ctr FROM campaign WHERE segments.date BETWEEN '${range.since}' AND '${range.until}' AND campaign.status = 'ENABLED' ORDER BY metrics.cost_micros DESC`;
   const body = await googleSearch(customerId, headers, query);
   const rows: { campaign?: { id?: string; name?: string; status?: string }; metrics?: Record<string, unknown> }[] = body.results || [];
 

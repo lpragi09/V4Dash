@@ -140,6 +140,7 @@ async function fetchMetaCampaigns(
       cliques: parseInt(row.clicks || '0', 10),
       ctr: parseFloat(row.ctr || '0'),
     }))
+    .filter((row) => row.status === 'ACTIVE')
     .sort((a, b) => b.gastos - a.gastos);
 }
 
@@ -203,12 +204,16 @@ async function fetchMetaDemographics(
 
   const rows = (json.data || []) as { age?: string; gender?: string; spend?: string; actions?: MetaActionValue[] }[];
   return rows
+    // Idade/gênero "unknown" e valores residuais de poucos centavos são ruído
+    // de atribuição do Meta, não público real segmentável — fora da tabela.
+    .filter((row) => row.age && row.age !== 'unknown' && row.gender && row.gender !== 'unknown')
     .map((row) => ({
-      faixaEtaria: row.age || '—',
-      genero: row.gender === 'male' ? 'Masculino' : row.gender === 'female' ? 'Feminino' : 'Desconhecido',
+      faixaEtaria: row.age!,
+      genero: row.gender === 'male' ? 'Masculino' : 'Feminino',
       gastos: parseFloat(row.spend || '0'),
       leads: findActionValue(row.actions, 'lead'),
     }))
+    .filter((row) => row.gastos >= 1)
     .sort((a, b) => b.gastos - a.gastos);
 }
 
