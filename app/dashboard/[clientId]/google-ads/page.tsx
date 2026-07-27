@@ -763,28 +763,28 @@ export default async function GoogleAdsClientPage({
             )}
           </div>
 
-          {devices.length > 0 && (
-            <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
-              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                <Smartphone className="w-5 h-5 text-zinc-500" />
-                Por Dispositivo
-                <InfoTooltip text="Gasto, cliques e conversões separados por celular, computador e tablet." />
-              </h2>
-              <DataTable
-                getRowKey={(row: GoogleDeviceRow) => row.dispositivo}
-                rows={devices}
-                columns={[
-                  { key: 'dispositivo', label: 'Dispositivo', render: (r) => <span className="text-white">{r.dispositivo}</span> },
-                  { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
-                  { key: 'cliques', label: 'Cliques', align: 'right', render: (r) => r.cliques },
-                  { key: 'conversoes', label: 'Conversões', align: 'right', render: (r) => r.conversoes },
-                ]}
-              />
-            </div>
-          )}
-
-          {(ageRanges.length > 0 || genders.length > 0) && (
+          {(devices.length > 0 || ageRanges.length > 0 || genders.length > 0) && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {devices.length > 0 && (
+                <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+                  <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                    <Smartphone className="w-5 h-5 text-zinc-500" />
+                    Por Dispositivo
+                    <InfoTooltip text="Gasto, cliques e conversões separados por celular, computador e tablet." />
+                  </h2>
+                  <DataTable
+                    getRowKey={(row: GoogleDeviceRow) => row.dispositivo}
+                    rows={devices}
+                    columns={[
+                      { key: 'dispositivo', label: 'Dispositivo', render: (r) => <span className="text-white">{r.dispositivo}</span> },
+                      { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                      { key: 'cliques', label: 'Cliques', align: 'right', render: (r) => r.cliques },
+                      { key: 'conversoes', label: 'Conversões', align: 'right', render: (r) => r.conversoes },
+                    ]}
+                  />
+                </div>
+              )}
+
               {ageRanges.length > 0 && (
                 <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
                   <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">

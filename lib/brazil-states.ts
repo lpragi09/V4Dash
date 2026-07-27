@@ -12,11 +12,19 @@ export interface BrazilStatePath {
 
 export const BRAZIL_MAP_VIEWBOX = "0 0 548 545";
 
+// O Google Ads nomeia os geo_target_constant em inglês (ex: "State of Minas
+// Gerais", "Federal District") — diferente do Meta, que já vem em português
+// ("Minas Gerais"). Cobre os dois formatos.
+const ENGLISH_NAME_OVERRIDES: Record<string, string> = {
+  'federal district': 'distrito federal',
+};
+
 function normalizeStateName(s: string): string {
-  return s
+  const normalized = s
     .toLowerCase()
     .trim()
     .replace(/^estado (do|da|de) /, '')
+    .replace(/^state of /, '')
     .replace(/ã/g, 'a')
     .replace(/á|â/g, 'a')
     .replace(/é|ê/g, 'e')
@@ -24,9 +32,10 @@ function normalizeStateName(s: string): string {
     .replace(/ó|ô|õ/g, 'o')
     .replace(/ú/g, 'u')
     .replace(/ç/g, 'c');
+  return ENGLISH_NAME_OVERRIDES[normalized] || normalized;
 }
 
-/** Acha o estado pelo nome (como o Meta retorna no breakdown de região), tolerando acento/maiúscula. */
+/** Acha o estado pelo nome (como o Meta/Google retornam), tolerando acento/maiúscula/prefixo em inglês. */
 export function findBrazilStateByName(name: string): { sigla: string; name: string } | undefined {
   const target = normalizeStateName(name);
   return BRAZIL_STATE_PATHS.find((s) => normalizeStateName(s.name) === target);

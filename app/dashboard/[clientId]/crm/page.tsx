@@ -76,7 +76,6 @@ export default async function CrmClientPage({
 
   let dashboardData = null;
   let fetchError = null;
-  let atualizadoEm: string | null = null;
   let dailyLeads: { date: string; value: number }[] = [];
   let dailyWon: { date: string; value: number }[] = [];
   let lossReasonBreakdown: ReturnType<typeof aggregateBreakdowns>['lossReasonBreakdown'] = [];
@@ -121,14 +120,10 @@ export default async function CrmClientPage({
     lossReasonBreakdown = breakdowns.lossReasonBreakdown;
     responsibleBreakdown = breakdowns.responsibleBreakdown;
     tagBreakdown = breakdowns.tagBreakdown;
-    atualizadoEm = snapshot.atualizado_em;
   }
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
-
-  const formatDateTime = (iso: string) =>
-    new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(iso));
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-500">
@@ -145,12 +140,7 @@ export default async function CrmClientPage({
             </p>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1.5">
-          <DateRangeFilter />
-          {atualizadoEm && (
-            <p className="text-xs text-zinc-500 shrink-0">Atualizado em {formatDateTime(atualizadoEm)}</p>
-          )}
-        </div>
+        <DateRangeFilter />
       </div>
 
       {fetchError && (
