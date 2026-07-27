@@ -10,12 +10,14 @@ import {
   Eye,
   Radar,
   Repeat,
-  Percent
+  Percent,
+  Video
 } from 'lucide-react';
 import Link from 'next/link';
 import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
 import ComparisonBadge from '@/components/ComparisonBadge';
+import DataTable from '@/components/DataTable';
 import { getValidAgencyMetaToken } from '@/lib/meta-agency';
 import { resolveDateRange, previousDateRange, datesInRange } from '@/lib/date-range';
 import DateRangeFilter from '@/components/DateRangeFilter';
@@ -38,6 +40,198 @@ interface MetaAggregate {
   frequencia: number;
   ctr: number;
   cpm: number;
+}
+
+interface MetaActionValue {
+  action_type: string;
+  value: string;
+}
+
+interface MetaCampaignRow {
+  id: string;
+  nome: string;
+  status: string;
+  gastos: number;
+  leads: number;
+  cliques: number;
+  ctr: number;
+}
+
+interface MetaActionRow {
+  tipo: string;
+  quantidade: number;
+  custo: number;
+}
+
+interface MetaDemographicRow {
+  faixaEtaria: string;
+  genero: string;
+  gastos: number;
+  leads: number;
+}
+
+interface MetaPlatformRow {
+  plataforma: string;
+  gastos: number;
+  leads: number;
+  impressoes: number;
+}
+
+/** Nomes amigáveis pros tipos de ação mais comuns do Meta — o resto mostra o nome técnico mesmo. */
+const ACTION_TYPE_LABELS: Record<string, string> = {
+  lead: 'Lead',
+  onsite_conversion: 'Conversão no site/app',
+  onsite_conversion_messaging_conversation_started_7d: 'Conversa iniciada (mensagem)',
+  link_click: 'Clique no link',
+  landing_page_view: 'Visualização da página',
+  post_engagement: 'Engajamento na publicação',
+  page_engagement: 'Engajamento na página',
+  video_view: 'Visualização de vídeo',
+  purchase: 'Compra',
+  omni_purchase: 'Compra',
+};
+
+function actionLabel(type: string): string {
+  return ACTION_TYPE_LABELS[type] || type.replace(/_/g, ' ');
+}
+
+function findActionValue(actions: MetaActionValue[] | undefined, type: string): number {
+  const found = actions?.find((a) => a.action_type === type);
+  return found ? parseFloat(found.value) : 0;
+}
+
+async function fetchMetaJson(url: string): Promise<{ data?: unknown[]; error?: { message?: string } }> {
+  const res = await fetch(url, { cache: 'no-store' });
+  return res.json();
+}
+
+async function fetchMetaCampaigns(
+  accountId: string,
+  accessToken: string,
+  range: { since: string; until: string }
+): Promise<MetaCampaignRow[]> {
+  const timeRange = encodeURIComponent(JSON.stringify(range));
+  const fields = 'campaign_id,campaign_name,spend,clicks,ctr,actions';
+  const url = `https://graph.facebook.com/v19.0/${accountId}/insights?access_token=${accessToken}&level=campaign&time_range=${timeRange}&fields=${fields}&limit=200`;
+  const json = await fetchMetaJson(url);
+  if (json.error) throw new Error(json.error.message);
+
+  const rows = (json.data || []) as {
+    campaign_id: string;
+    campaign_name: string;
+    spend?: string;
+    clicks?: string;
+    ctr?: string;
+    actions?: MetaActionValue[];
+  }[];
+
+  // Status não vem no insights — busca à parte e casa pelo ID.
+  const statusUrl = `https://graph.facebook.com/v19.0/${accountId}/campaigns?access_token=${accessToken}&fields=id,status&limit=200`;
+  const statusJson = await fetchMetaJson(statusUrl).catch(() => ({ data: [] }));
+  const statusMap = new Map(((statusJson.data || []) as { id: string; status: string }[]).map((c) => [c.id, c.status]));
+
+  return rows
+    .map((row) => ({
+      id: row.campaign_id,
+      nome: row.campaign_name,
+      status: statusMap.get(row.campaign_id) || '—',
+      gastos: parseFloat(row.spend || '0'),
+      leads: findActionValue(row.actions, 'lead'),
+      cliques: parseInt(row.clicks || '0', 10),
+      ctr: parseFloat(row.ctr || '0'),
+    }))
+    .sort((a, b) => b.gastos - a.gastos);
+}
+
+async function fetchMetaActionBreakdown(
+  accountId: string,
+  accessToken: string,
+  range: { since: string; until: string }
+): Promise<MetaActionRow[]> {
+  const timeRange = encodeURIComponent(JSON.stringify(range));
+  const url = `https://graph.facebook.com/v19.0/${accountId}/insights?access_token=${accessToken}&time_range=${timeRange}&fields=actions,cost_per_action_type`;
+  const json = await fetchMetaJson(url);
+  if (json.error) throw new Error(json.error.message);
+
+  const insight = (json.data?.[0] || {}) as { actions?: MetaActionValue[]; cost_per_action_type?: MetaActionValue[] };
+  const actions = insight.actions || [];
+  const costs = insight.cost_per_action_type || [];
+
+  return actions
+    .map((a) => ({
+      tipo: actionLabel(a.action_type),
+      quantidade: parseFloat(a.value),
+      custo: findActionValue(costs, a.action_type),
+    }))
+    .sort((a, b) => b.quantidade - a.quantidade);
+}
+
+async function fetchMetaVideoAndRoas(
+  accountId: string,
+  accessToken: string,
+  range: { since: string; until: string }
+): Promise<{ videoPlays: number; videoAvgWatchSec: number; valorConversao: number }> {
+  const timeRange = encodeURIComponent(JSON.stringify(range));
+  const fields = 'video_play_actions,video_avg_time_watched_actions,action_values';
+  const url = `https://graph.facebook.com/v19.0/${accountId}/insights?access_token=${accessToken}&time_range=${timeRange}&fields=${fields}`;
+  const json = await fetchMetaJson(url);
+  if (json.error) throw new Error(json.error.message);
+
+  const insight = (json.data?.[0] || {}) as {
+    video_play_actions?: MetaActionValue[];
+    video_avg_time_watched_actions?: MetaActionValue[];
+    action_values?: MetaActionValue[];
+  };
+
+  const videoPlays = findActionValue(insight.video_play_actions, 'video_view');
+  const videoAvgWatchSec = findActionValue(insight.video_avg_time_watched_actions, 'video_view');
+  const valorConversao =
+    findActionValue(insight.action_values, 'omni_purchase') || findActionValue(insight.action_values, 'purchase');
+
+  return { videoPlays, videoAvgWatchSec, valorConversao };
+}
+
+async function fetchMetaDemographics(
+  accountId: string,
+  accessToken: string,
+  range: { since: string; until: string }
+): Promise<MetaDemographicRow[]> {
+  const timeRange = encodeURIComponent(JSON.stringify(range));
+  const url = `https://graph.facebook.com/v19.0/${accountId}/insights?access_token=${accessToken}&time_range=${timeRange}&breakdowns=age,gender&fields=spend,actions&limit=200`;
+  const json = await fetchMetaJson(url);
+  if (json.error) throw new Error(json.error.message);
+
+  const rows = (json.data || []) as { age?: string; gender?: string; spend?: string; actions?: MetaActionValue[] }[];
+  return rows
+    .map((row) => ({
+      faixaEtaria: row.age || '—',
+      genero: row.gender === 'male' ? 'Masculino' : row.gender === 'female' ? 'Feminino' : 'Desconhecido',
+      gastos: parseFloat(row.spend || '0'),
+      leads: findActionValue(row.actions, 'lead'),
+    }))
+    .sort((a, b) => b.gastos - a.gastos);
+}
+
+async function fetchMetaPlatforms(
+  accountId: string,
+  accessToken: string,
+  range: { since: string; until: string }
+): Promise<MetaPlatformRow[]> {
+  const timeRange = encodeURIComponent(JSON.stringify(range));
+  const url = `https://graph.facebook.com/v19.0/${accountId}/insights?access_token=${accessToken}&time_range=${timeRange}&breakdowns=publisher_platform&fields=spend,impressions,actions&limit=200`;
+  const json = await fetchMetaJson(url);
+  if (json.error) throw new Error(json.error.message);
+
+  const rows = (json.data || []) as { publisher_platform?: string; spend?: string; impressions?: string; actions?: MetaActionValue[] }[];
+  const labels: Record<string, string> = { facebook: 'Facebook', instagram: 'Instagram', audience_network: 'Audience Network', messenger: 'Messenger' };
+  return rows
+    .map((row) => ({
+      plataforma: labels[row.publisher_platform || ''] || row.publisher_platform || '—',
+      gastos: parseFloat(row.spend || '0'),
+      leads: findActionValue(row.actions, 'lead'),
+      impressoes: parseInt(row.impressions || '0', 10),
+    }))
+    .sort((a, b) => b.gastos - a.gastos);
 }
 
 /** Preenche com 0 os dias sem retorno da API, pra série sempre ir até hoje. */
@@ -119,6 +313,13 @@ export default async function MetaAdsClientPage({
   let fetchError = null;
   let dailySpend: { date: string; value: number }[] = [];
   let dailyLeads: { date: string; value: number }[] = [];
+  let campaigns: MetaCampaignRow[] = [];
+  let actionBreakdown: MetaActionRow[] = [];
+  let demographics: MetaDemographicRow[] = [];
+  let platforms: MetaPlatformRow[] = [];
+  let videoPlays = 0;
+  let videoAvgWatchSec = 0;
+  let valorConversao = 0;
 
   if (!accessToken) {
     fetchError = "Meta Ads não autorizado pela agência. Autorize em Configurações Gerais.";
@@ -168,6 +369,37 @@ export default async function MetaAdsClientPage({
         );
       } else {
         console.error('Error fetching daily Meta Ads series:', dailySettled.reason);
+      }
+
+      // Detalhamentos extras (campanha, tipo de ação, público, plataforma, vídeo/ROAS)
+      // são independentes do card principal — se um falhar, os outros continuam
+      // aparecendo normalmente, só essa seção específica some.
+      const [campaignsSettled, actionsSettled, demoSettled, platformsSettled, videoRoasSettled] = await Promise.allSettled([
+        fetchMetaCampaigns(normalizedAccountId, accessToken, current),
+        fetchMetaActionBreakdown(normalizedAccountId, accessToken, current),
+        fetchMetaDemographics(normalizedAccountId, accessToken, current),
+        fetchMetaPlatforms(normalizedAccountId, accessToken, current),
+        fetchMetaVideoAndRoas(normalizedAccountId, accessToken, current),
+      ]);
+
+      if (campaignsSettled.status === 'fulfilled') campaigns = campaignsSettled.value;
+      else console.error('Error fetching Meta campaigns breakdown:', campaignsSettled.reason);
+
+      if (actionsSettled.status === 'fulfilled') actionBreakdown = actionsSettled.value;
+      else console.error('Error fetching Meta action breakdown:', actionsSettled.reason);
+
+      if (demoSettled.status === 'fulfilled') demographics = demoSettled.value;
+      else console.error('Error fetching Meta demographics:', demoSettled.reason);
+
+      if (platformsSettled.status === 'fulfilled') platforms = platformsSettled.value;
+      else console.error('Error fetching Meta platforms:', platformsSettled.reason);
+
+      if (videoRoasSettled.status === 'fulfilled') {
+        videoPlays = videoRoasSettled.value.videoPlays;
+        videoAvgWatchSec = videoRoasSettled.value.videoAvgWatchSec;
+        valorConversao = videoRoasSettled.value.valorConversao;
+      } else {
+        console.error('Error fetching Meta video/ROAS:', videoRoasSettled.reason);
       }
     } catch (err) {
       dashboardData = null;
@@ -336,6 +568,142 @@ export default async function MetaAdsClientPage({
               <h3 className="text-white font-bold mb-4">Leads Diários</h3>
               <TrendChart series={[{ name: 'Leads', color: 'blue', points: dailyLeads }]} />
             </div>
+          </div>
+
+          {(videoPlays > 0 || valorConversao > 0) && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {videoPlays > 0 && (
+                <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+                  <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      Reproduções de Vídeo
+                      <InfoTooltip text="Número de vezes que os vídeos dos anúncios foram reproduzidos." />
+                    </span>
+                    <Video className="w-5 h-5 text-zinc-500" />
+                  </h3>
+                  <p className="text-3xl font-bold text-white mb-2">{videoPlays}</p>
+                </div>
+              )}
+              {videoAvgWatchSec > 0 && (
+                <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+                  <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      Tempo Médio Assistido
+                      <InfoTooltip text="Média de segundos que as pessoas assistiram aos vídeos dos anúncios." />
+                    </span>
+                    <Video className="w-5 h-5 text-zinc-500" />
+                  </h3>
+                  <p className="text-3xl font-bold text-white mb-2">{videoAvgWatchSec.toFixed(1)}s</p>
+                </div>
+              )}
+              {valorConversao > 0 && (
+                <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+                  <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      Valor de Conversão
+                      <InfoTooltip text="Valor monetário total atribuído às compras/conversões rastreadas pelo pixel do Meta no período." />
+                    </span>
+                    <DollarSign className="w-5 h-5 text-zinc-500" />
+                  </h3>
+                  <p className="text-3xl font-bold text-white mb-2">{formatCurrency(valorConversao)}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+              Desempenho por Campanha
+              <InfoTooltip text="Cada campanha listada separadamente, sem somar com as demais." />
+            </h2>
+            <DataTable
+              getRowKey={(row: MetaCampaignRow) => row.id}
+              rows={campaigns}
+              columns={[
+                { key: 'nome', label: 'Campanha', render: (r) => <span className="text-white">{r.nome}</span> },
+                {
+                  key: 'status',
+                  label: 'Status',
+                  render: (r) => (
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        r.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-zinc-700/50 text-zinc-400'
+                      }`}
+                    >
+                      {r.status === 'ACTIVE' ? 'Ativa' : r.status === 'PAUSED' ? 'Pausada' : r.status}
+                    </span>
+                  ),
+                },
+                { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                { key: 'leads', label: 'Leads', align: 'right', render: (r) => r.leads },
+                {
+                  key: 'cpl',
+                  label: 'CPL',
+                  align: 'right',
+                  render: (r) => formatCurrency(r.leads > 0 ? r.gastos / r.leads : 0),
+                },
+                { key: 'cliques', label: 'Cliques', align: 'right', render: (r) => r.cliques },
+                { key: 'ctr', label: 'CTR', align: 'right', render: (r) => `${r.ctr.toFixed(2)}%` },
+              ]}
+            />
+          </div>
+
+          {actionBreakdown.length > 0 && (
+            <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                Detalhamento por Tipo de Ação
+                <InfoTooltip text="Todas as ações rastreadas pelo Meta no período, cada tipo separado (não é só 'lead')." />
+              </h2>
+              <DataTable
+                getRowKey={(row: MetaActionRow) => row.tipo}
+                rows={actionBreakdown}
+                columns={[
+                  { key: 'tipo', label: 'Tipo de Ação', render: (r) => <span className="text-white capitalize">{r.tipo}</span> },
+                  { key: 'quantidade', label: 'Quantidade', align: 'right', render: (r) => r.quantidade },
+                  { key: 'custo', label: 'Custo por Ação', align: 'right', render: (r) => formatCurrency(r.custo) },
+                ]}
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {demographics.length > 0 && (
+              <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+                <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  Público (Idade e Gênero)
+                  <InfoTooltip text="Gasto e leads segmentados por faixa etária e gênero." />
+                </h2>
+                <DataTable
+                  getRowKey={(row: MetaDemographicRow, i) => `${row.faixaEtaria}-${row.genero}-${i}`}
+                  rows={demographics}
+                  columns={[
+                    { key: 'faixaEtaria', label: 'Faixa Etária', render: (r) => <span className="text-white">{r.faixaEtaria}</span> },
+                    { key: 'genero', label: 'Gênero', render: (r) => r.genero },
+                    { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                    { key: 'leads', label: 'Leads', align: 'right', render: (r) => r.leads },
+                  ]}
+                />
+              </div>
+            )}
+
+            {platforms.length > 0 && (
+              <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+                <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  Plataforma
+                  <InfoTooltip text="Gasto, leads e impressões separados por onde o anúncio apareceu (Facebook, Instagram, etc)." />
+                </h2>
+                <DataTable
+                  getRowKey={(row: MetaPlatformRow) => row.plataforma}
+                  rows={platforms}
+                  columns={[
+                    { key: 'plataforma', label: 'Plataforma', render: (r) => <span className="text-white">{r.plataforma}</span> },
+                    { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                    { key: 'leads', label: 'Leads', align: 'right', render: (r) => r.leads },
+                    { key: 'impressoes', label: 'Impressões', align: 'right', render: (r) => r.impressoes },
+                  ]}
+                />
+              </div>
+            )}
           </div>
         </>
       )}

@@ -9,12 +9,15 @@ import {
   Activity,
   Settings,
   Eye,
-  Percent
+  Percent,
+  Smartphone,
+  Target
 } from 'lucide-react';
 import Link from 'next/link';
 import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
 import ComparisonBadge from '@/components/ComparisonBadge';
+import DataTable from '@/components/DataTable';
 import { getValidAgencyGoogleToken } from '@/lib/google-agency';
 import { resolveDateRange, previousDateRange, datesInRange } from '@/lib/date-range';
 import DateRangeFilter from '@/components/DateRangeFilter';
@@ -34,7 +37,63 @@ interface GoogleAggregate {
   impressoes: number;
   ctr: number;
   cpcMedio: number;
+  valorConversao: number;
+  impressionShare: number;
 }
+
+interface GoogleCampaignRow {
+  id: string;
+  nome: string;
+  status: string;
+  gastos: number;
+  leads: number;
+  cliques: number;
+  ctr: number;
+}
+
+interface GoogleSearchTermRow {
+  termo: string;
+  cliques: number;
+  impressoes: number;
+  gastos: number;
+  conversoes: number;
+}
+
+interface GoogleKeywordRow {
+  palavra: string;
+  matchType: string;
+  qualityScore: number | null;
+  cliques: number;
+  gastos: number;
+  conversoes: number;
+}
+
+interface GoogleDeviceRow {
+  dispositivo: string;
+  gastos: number;
+  cliques: number;
+  conversoes: number;
+}
+
+const MATCH_TYPE_LABELS: Record<string, string> = {
+  EXACT: 'Exata',
+  PHRASE: 'Frase',
+  BROAD: 'Ampla',
+};
+
+const DEVICE_LABELS: Record<string, string> = {
+  MOBILE: 'Celular',
+  DESKTOP: 'Computador',
+  TABLET: 'Tablet',
+  CONNECTED_TV: 'TV Conectada',
+  OTHER: 'Outro',
+};
+
+const CAMPAIGN_STATUS_LABELS: Record<string, string> = {
+  ENABLED: 'Ativa',
+  PAUSED: 'Pausada',
+  REMOVED: 'Removida',
+};
 
 /** Preenche com 0 os dias sem retorno da API, pra série sempre ir até hoje. */
 function alignSeries(dates: string[], rows: { date: string; value: number }[]): { date: string; value: number }[] {
@@ -42,13 +101,7 @@ function alignSeries(dates: string[], rows: { date: string; value: number }[]): 
   return dates.map((d) => ({ date: d, value: map.get(d) || 0 }));
 }
 
-async function fetchGoogleAggregate(
-  customerId: string,
-  headers: Record<string, string>,
-  range: { since: string; until: string }
-): Promise<GoogleAggregate> {
-  const query = `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.ctr, metrics.average_cpc FROM customer WHERE segments.date BETWEEN '${range.since}' AND '${range.until}'`;
-
+async function googleSearch(customerId: string, headers: Record<string, string>, query: string) {
   const res = await fetch(`https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:search`, {
     method: 'POST',
     headers,
@@ -56,10 +109,19 @@ async function fetchGoogleAggregate(
     cache: 'no-store',
   });
   const body = await res.json();
-
   if (!res.ok) {
     throw new Error(body?.error?.message || `Erro na API do Google Ads (${res.status})`);
   }
+  return body;
+}
+
+async function fetchGoogleAggregate(
+  customerId: string,
+  headers: Record<string, string>,
+  range: { since: string; until: string }
+): Promise<GoogleAggregate> {
+  const query = `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value, metrics.ctr, metrics.average_cpc, metrics.search_impression_share FROM customer WHERE segments.date BETWEEN '${range.since}' AND '${range.until}'`;
+  const body = await googleSearch(customerId, headers, query);
 
   const metrics = body.results?.[0]?.metrics;
   const spend = metrics ? Number(metrics.costMicros || 0) / 1_000_000 : 0;
@@ -73,7 +135,88 @@ async function fetchGoogleAggregate(
     impressoes: metrics ? Number(metrics.impressions || 0) : 0,
     ctr: metrics ? Number(metrics.ctr || 0) * 100 : 0,
     cpcMedio: metrics ? Number(metrics.averageCpc || 0) / 1_000_000 : 0,
+    valorConversao: metrics ? Number(metrics.conversionsValue || 0) : 0,
+    impressionShare: metrics ? Number(metrics.searchImpressionShare || 0) * 100 : 0,
   };
+}
+
+async function fetchGoogleCampaigns(
+  customerId: string,
+  headers: Record<string, string>,
+  range: { since: string; until: string }
+): Promise<GoogleCampaignRow[]> {
+  const query = `SELECT campaign.id, campaign.name, campaign.status, metrics.cost_micros, metrics.clicks, metrics.conversions, metrics.ctr FROM campaign WHERE segments.date BETWEEN '${range.since}' AND '${range.until}' ORDER BY metrics.cost_micros DESC`;
+  const body = await googleSearch(customerId, headers, query);
+  const rows: { campaign?: { id?: string; name?: string; status?: string }; metrics?: Record<string, unknown> }[] = body.results || [];
+
+  return rows.map((row) => ({
+    id: row.campaign?.id || '',
+    nome: row.campaign?.name || '—',
+    status: CAMPAIGN_STATUS_LABELS[row.campaign?.status || ''] || row.campaign?.status || '—',
+    gastos: Number(row.metrics?.costMicros || 0) / 1_000_000,
+    leads: Number(row.metrics?.conversions || 0),
+    cliques: Number(row.metrics?.clicks || 0),
+    ctr: Number(row.metrics?.ctr || 0) * 100,
+  }));
+}
+
+async function fetchGoogleSearchTerms(
+  customerId: string,
+  headers: Record<string, string>,
+  range: { since: string; until: string }
+): Promise<GoogleSearchTermRow[]> {
+  const query = `SELECT search_term_view.search_term, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions FROM search_term_view WHERE segments.date BETWEEN '${range.since}' AND '${range.until}' ORDER BY metrics.clicks DESC LIMIT 20`;
+  const body = await googleSearch(customerId, headers, query);
+  const rows: { searchTermView?: { searchTerm?: string }; metrics?: Record<string, unknown> }[] = body.results || [];
+
+  return rows.map((row) => ({
+    termo: row.searchTermView?.searchTerm || '—',
+    cliques: Number(row.metrics?.clicks || 0),
+    impressoes: Number(row.metrics?.impressions || 0),
+    gastos: Number(row.metrics?.costMicros || 0) / 1_000_000,
+    conversoes: Number(row.metrics?.conversions || 0),
+  }));
+}
+
+async function fetchGoogleKeywords(
+  customerId: string,
+  headers: Record<string, string>,
+  range: { since: string; until: string }
+): Promise<GoogleKeywordRow[]> {
+  const query = `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.quality_info.quality_score, metrics.clicks, metrics.cost_micros, metrics.conversions FROM keyword_view WHERE segments.date BETWEEN '${range.since}' AND '${range.until}' ORDER BY metrics.clicks DESC LIMIT 20`;
+  const body = await googleSearch(customerId, headers, query);
+  const rows: {
+    adGroupCriterion?: { keyword?: { text?: string; matchType?: string }; qualityInfo?: { qualityScore?: number } };
+    metrics?: Record<string, unknown>;
+  }[] = body.results || [];
+
+  return rows.map((row) => ({
+    palavra: row.adGroupCriterion?.keyword?.text || '—',
+    matchType: MATCH_TYPE_LABELS[row.adGroupCriterion?.keyword?.matchType || ''] || row.adGroupCriterion?.keyword?.matchType || '—',
+    qualityScore: row.adGroupCriterion?.qualityInfo?.qualityScore ?? null,
+    cliques: Number(row.metrics?.clicks || 0),
+    gastos: Number(row.metrics?.costMicros || 0) / 1_000_000,
+    conversoes: Number(row.metrics?.conversions || 0),
+  }));
+}
+
+async function fetchGoogleDevices(
+  customerId: string,
+  headers: Record<string, string>,
+  range: { since: string; until: string }
+): Promise<GoogleDeviceRow[]> {
+  const query = `SELECT segments.device, metrics.cost_micros, metrics.clicks, metrics.conversions FROM customer WHERE segments.date BETWEEN '${range.since}' AND '${range.until}'`;
+  const body = await googleSearch(customerId, headers, query);
+  const rows: { segments?: { device?: string }; metrics?: Record<string, unknown> }[] = body.results || [];
+
+  return rows
+    .map((row) => ({
+      dispositivo: DEVICE_LABELS[row.segments?.device || ''] || row.segments?.device || '—',
+      gastos: Number(row.metrics?.costMicros || 0) / 1_000_000,
+      cliques: Number(row.metrics?.clicks || 0),
+      conversoes: Number(row.metrics?.conversions || 0),
+    }))
+    .sort((a, b) => b.gastos - a.gastos);
 }
 
 export default async function GoogleAdsClientPage({
@@ -112,6 +255,10 @@ export default async function GoogleAdsClientPage({
   let fetchError = null;
   let dailySpend: { date: string; value: number }[] = [];
   let dailyClicks: { date: string; value: number }[] = [];
+  let campaigns: GoogleCampaignRow[] = [];
+  let searchTerms: GoogleSearchTermRow[] = [];
+  let keywords: GoogleKeywordRow[] = [];
+  let devices: GoogleDeviceRow[] = [];
 
   if (!accessToken) {
     fetchError = "Google Ads não autorizado pela agência. Autorize em Configurações Gerais.";
@@ -175,6 +322,28 @@ export default async function GoogleAdsClientPage({
       } else {
         console.error('Error fetching daily Google Ads series:', dailySettled.reason);
       }
+
+      // Detalhamentos extras (campanha, termos de pesquisa, palavras-chave,
+      // dispositivo) são independentes do card principal — se um falhar, só
+      // essa seção específica some, o resto da página continua normal.
+      const [campaignsSettled, searchTermsSettled, keywordsSettled, devicesSettled] = await Promise.allSettled([
+        fetchGoogleCampaigns(customerId, headers, current),
+        fetchGoogleSearchTerms(customerId, headers, current),
+        fetchGoogleKeywords(customerId, headers, current),
+        fetchGoogleDevices(customerId, headers, current),
+      ]);
+
+      if (campaignsSettled.status === 'fulfilled') campaigns = campaignsSettled.value;
+      else console.error('Error fetching Google campaigns breakdown:', campaignsSettled.reason);
+
+      if (searchTermsSettled.status === 'fulfilled') searchTerms = searchTermsSettled.value;
+      else console.error('Error fetching Google search terms:', searchTermsSettled.reason);
+
+      if (keywordsSettled.status === 'fulfilled') keywords = keywordsSettled.value;
+      else console.error('Error fetching Google keywords:', keywordsSettled.reason);
+
+      if (devicesSettled.status === 'fulfilled') devices = devicesSettled.value;
+      else console.error('Error fetching Google devices breakdown:', devicesSettled.reason);
     } catch (err) {
       dashboardData = null;
       fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do Google Ads.";
@@ -304,6 +473,34 @@ export default async function GoogleAdsClientPage({
               <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.cpcMedio)}</p>
               {previousData && <ComparisonBadge current={dashboardData.cpcMedio} previous={previousData.cpcMedio} invert />}
             </div>
+
+            {dashboardData.valorConversao > 0 && (
+              <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+                <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    Valor de Conversão
+                    <InfoTooltip text="Valor monetário total atribuído às conversões rastreadas no Google Ads no período." />
+                  </span>
+                  <DollarSign className="w-5 h-5 text-zinc-500" />
+                </h3>
+                <p className="text-3xl font-bold text-white mb-2">{formatCurrency(dashboardData.valorConversao)}</p>
+                {previousData && <ComparisonBadge current={dashboardData.valorConversao} previous={previousData.valorConversao} />}
+              </div>
+            )}
+
+            {dashboardData.impressionShare > 0 && (
+              <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
+                <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    Impression Share (Pesquisa)
+                    <InfoTooltip text="Percentual de impressões que suas campanhas de pesquisa receberam em relação ao total que poderiam ter recebido." />
+                  </span>
+                  <Target className="w-5 h-5 text-zinc-500" />
+                </h3>
+                <p className="text-3xl font-bold text-white mb-2">{dashboardData.impressionShare.toFixed(1)}%</p>
+                {previousData && <ComparisonBadge current={dashboardData.impressionShare} previous={previousData.impressionShare} />}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -319,6 +516,95 @@ export default async function GoogleAdsClientPage({
               <TrendChart series={[{ name: 'Cliques', color: 'emerald', points: dailyClicks }]} />
             </div>
           </div>
+
+          <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+              Desempenho por Campanha
+              <InfoTooltip text="Cada campanha listada separadamente, sem somar com as demais." />
+            </h2>
+            <DataTable
+              getRowKey={(row: GoogleCampaignRow) => row.id}
+              rows={campaigns}
+              columns={[
+                { key: 'nome', label: 'Campanha', render: (r) => <span className="text-white">{r.nome}</span> },
+                {
+                  key: 'status',
+                  label: 'Status',
+                  render: (r) => (
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${r.status === 'Ativa' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-zinc-700/50 text-zinc-400'}`}>
+                      {r.status}
+                    </span>
+                  ),
+                },
+                { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                { key: 'leads', label: 'Leads', align: 'right', render: (r) => r.leads },
+                { key: 'cpl', label: 'CPL', align: 'right', render: (r) => formatCurrency(r.leads > 0 ? r.gastos / r.leads : 0) },
+                { key: 'cliques', label: 'Cliques', align: 'right', render: (r) => r.cliques },
+                { key: 'ctr', label: 'CTR', align: 'right', render: (r) => `${r.ctr.toFixed(2)}%` },
+              ]}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {searchTerms.length > 0 && (
+              <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+                <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  Termos de Pesquisa
+                  <InfoTooltip text="O que as pessoas digitaram no Google antes de ver o anúncio — top 20 por cliques." />
+                </h2>
+                <DataTable
+                  getRowKey={(row: GoogleSearchTermRow, i) => `${row.termo}-${i}`}
+                  rows={searchTerms}
+                  columns={[
+                    { key: 'termo', label: 'Termo', render: (r) => <span className="text-white">{r.termo}</span> },
+                    { key: 'cliques', label: 'Cliques', align: 'right', render: (r) => r.cliques },
+                    { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                    { key: 'conversoes', label: 'Conversões', align: 'right', render: (r) => r.conversoes },
+                  ]}
+                />
+              </div>
+            )}
+
+            {keywords.length > 0 && (
+              <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+                <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  Palavras-chave
+                  <InfoTooltip text="Desempenho por palavra-chave, com o Quality Score do Google (1 a 10) quando disponível — top 20 por cliques." />
+                </h2>
+                <DataTable
+                  getRowKey={(row: GoogleKeywordRow, i) => `${row.palavra}-${i}`}
+                  rows={keywords}
+                  columns={[
+                    { key: 'palavra', label: 'Palavra-chave', render: (r) => <span className="text-white">{r.palavra}</span> },
+                    { key: 'matchType', label: 'Correspondência', render: (r) => r.matchType },
+                    { key: 'qualityScore', label: 'Quality Score', align: 'right', render: (r) => r.qualityScore ?? '—' },
+                    { key: 'cliques', label: 'Cliques', align: 'right', render: (r) => r.cliques },
+                    { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                  ]}
+                />
+              </div>
+            )}
+          </div>
+
+          {devices.length > 0 && (
+            <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-zinc-500" />
+                Por Dispositivo
+                <InfoTooltip text="Gasto, cliques e conversões separados por celular, computador e tablet." />
+              </h2>
+              <DataTable
+                getRowKey={(row: GoogleDeviceRow) => row.dispositivo}
+                rows={devices}
+                columns={[
+                  { key: 'dispositivo', label: 'Dispositivo', render: (r) => <span className="text-white">{r.dispositivo}</span> },
+                  { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                  { key: 'cliques', label: 'Cliques', align: 'right', render: (r) => r.cliques },
+                  { key: 'conversoes', label: 'Conversões', align: 'right', render: (r) => r.conversoes },
+                ]}
+              />
+            </div>
+          )}
         </>
       )}
     </div>

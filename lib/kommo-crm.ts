@@ -17,6 +17,14 @@ export interface KommoLeadSnapshot {
   created_at?: number;
   closed_at?: number;
   contact_id?: number;
+  loss_reason_id?: number;
+  responsible_user_id?: number;
+  tags?: string[];
+}
+
+export interface NamedRef {
+  id: number;
+  name: string;
 }
 
 export interface CrmAggregate {
@@ -53,7 +61,7 @@ async function fetchAllKommoLeads(
         const url = new URL(`https://${domain}/api/v4/leads`);
         url.searchParams.set('limit', String(limit));
         url.searchParams.set('page', String(p));
-        url.searchParams.set('with', 'contacts');
+        url.searchParams.set('with', 'contacts,tags');
         if (createdAfterUnix) {
           url.searchParams.set('filter[created_at][from]', String(createdAfterUnix));
         }
@@ -81,17 +89,26 @@ async function fetchAllKommoLeads(
             price?: number;
             created_at?: number;
             closed_at?: number;
-            _embedded?: { contacts?: Array<{ id: number; is_main?: boolean }> };
+            loss_reason_id?: number;
+            responsible_user_id?: number;
+            _embedded?: {
+              contacts?: Array<{ id: number; is_main?: boolean }>;
+              tags?: Array<{ name: string }>;
+            };
           }>;
           return leads.map((lead) => {
             const contacts = lead._embedded?.contacts || [];
             const mainContact = contacts.find((c) => c.is_main) || contacts[0];
+            const tags = (lead._embedded?.tags || []).map((t) => t.name).filter(Boolean);
             return {
               status_id: lead.status_id,
               price: lead.price,
               created_at: lead.created_at,
               closed_at: lead.closed_at,
               contact_id: mainContact?.id,
+              loss_reason_id: lead.loss_reason_id,
+              responsible_user_id: lead.responsible_user_id,
+              tags: tags.length > 0 ? tags : undefined,
             };
           });
         }
@@ -141,6 +158,36 @@ async function fetchNaoFechouStatusIds(domain: string, accessToken: string): Pro
   }
 }
 
+async function fetchLossReasons(domain: string, accessToken: string): Promise<NamedRef[]> {
+  try {
+    const res = await fetch(`https://${domain}/api/v4/leads/loss_reasons`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const reasons = (json._embedded?.loss_reasons || []) as Array<{ id: number; name: string }>;
+    return reasons.map((r) => ({ id: r.id, name: r.name }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchUsers(domain: string, accessToken: string): Promise<NamedRef[]> {
+  try {
+    const res = await fetch(`https://${domain}/api/v4/users?limit=250`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const users = (json._embedded?.users || []) as Array<{ id: number; name: string }>;
+    return users.map((u) => ({ id: u.id, name: u.name }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Busca tudo do Kommo pra um cliente e grava o snapshot no Supabase.
  * Guarda dois recortes: "leads" (histórico inteiro, até o teto de paginação —
@@ -158,10 +205,12 @@ export async function syncClientCrmSnapshot(
   cutoffDate.setDate(cutoffDate.getDate() - 31);
   const cutoffUnix = Math.floor(cutoffDate.getTime() / 1000);
 
-  const [naoFechouIds, leads, recentLeads] = await Promise.all([
+  const [naoFechouIds, leads, recentLeads, lossReasons, users] = await Promise.all([
     fetchNaoFechouStatusIds(domain, accessToken),
     fetchAllKommoLeads(domain, accessToken),
     fetchAllKommoLeads(domain, accessToken, cutoffUnix),
+    fetchLossReasons(domain, accessToken),
+    fetchUsers(domain, accessToken),
   ]);
 
   const { error } = await supabase.from('crm_snapshots').upsert(
@@ -170,6 +219,8 @@ export async function syncClientCrmSnapshot(
       leads,
       recent_leads: recentLeads,
       nao_fechou_ids: naoFechouIds,
+      loss_reasons: lossReasons,
+      users,
       atualizado_em: new Date().toISOString(),
     },
     { onConflict: 'cliente_id' }
@@ -207,6 +258,86 @@ export function aggregateCrmLeads(
   }
 
   return { oportunidades, ganhas, perdidas, naoFechou, vendas: clientesGanhos.size, valorGanho, valorPipeline, valorNaoFechou };
+}
+
+export function filterLeadsByDate(
+  leads: KommoLeadSnapshot[],
+  createdAfterUnix?: number,
+  createdBeforeUnix?: number
+): KommoLeadSnapshot[] {
+  if (!createdAfterUnix && !createdBeforeUnix) return leads;
+  return leads.filter((lead) => {
+    if (createdAfterUnix && (!lead.created_at || lead.created_at < createdAfterUnix)) return false;
+    if (createdBeforeUnix && (!lead.created_at || lead.created_at > createdBeforeUnix)) return false;
+    return true;
+  });
+}
+
+export interface LossReasonBreakdown {
+  motivo: string;
+  quantidade: number;
+  valor: number;
+}
+
+export interface ResponsibleBreakdown {
+  responsavel: string;
+  oportunidades: number;
+  ganhas: number;
+  valorGanho: number;
+}
+
+export interface TagBreakdown {
+  tag: string;
+  quantidade: number;
+}
+
+/**
+ * Motivos de perda, performance por responsável e tags mais usadas — cada um
+ * separado, sem somar com as outras métricas do funil.
+ */
+export function aggregateBreakdowns(
+  leads: KommoLeadSnapshot[],
+  lossReasons: NamedRef[],
+  users: NamedRef[]
+): { lossReasonBreakdown: LossReasonBreakdown[]; responsibleBreakdown: ResponsibleBreakdown[]; tagBreakdown: TagBreakdown[] } {
+  const lossReasonNames = new Map(lossReasons.map((r) => [r.id, r.name]));
+  const userNames = new Map(users.map((u) => [u.id, u.name]));
+
+  const lossMap = new Map<string, LossReasonBreakdown>();
+  const responsibleMap = new Map<string, ResponsibleBreakdown>();
+  const tagMap = new Map<string, number>();
+
+  for (const lead of leads) {
+    if (lead.status_id === STATUS_PERDIDO) {
+      const motivo = lead.loss_reason_id ? lossReasonNames.get(lead.loss_reason_id) || 'Sem motivo definido' : 'Sem motivo definido';
+      const entry = lossMap.get(motivo) || { motivo, quantidade: 0, valor: 0 };
+      entry.quantidade += 1;
+      entry.valor += lead.price || 0;
+      lossMap.set(motivo, entry);
+    }
+
+    const responsavel = lead.responsible_user_id ? userNames.get(lead.responsible_user_id) || 'Desconhecido' : 'Sem responsável';
+    const respEntry = responsibleMap.get(responsavel) || { responsavel, oportunidades: 0, ganhas: 0, valorGanho: 0 };
+    respEntry.oportunidades += 1;
+    if (lead.status_id === STATUS_GANHO) {
+      respEntry.ganhas += 1;
+      respEntry.valorGanho += lead.price || 0;
+    }
+    responsibleMap.set(responsavel, respEntry);
+
+    for (const tag of lead.tags || []) {
+      tagMap.set(tag, (tagMap.get(tag) || 0) + 1);
+    }
+  }
+
+  return {
+    lossReasonBreakdown: Array.from(lossMap.values()).sort((a, b) => b.quantidade - a.quantidade),
+    responsibleBreakdown: Array.from(responsibleMap.values()).sort((a, b) => b.valorGanho - a.valorGanho),
+    tagBreakdown: Array.from(tagMap.entries())
+      .map(([tag, quantidade]) => ({ tag, quantidade }))
+      .sort((a, b) => b.quantidade - a.quantidade)
+      .slice(0, 20),
+  };
 }
 
 export function buildDailySeries(

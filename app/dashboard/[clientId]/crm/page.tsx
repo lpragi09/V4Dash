@@ -9,12 +9,23 @@ import {
   Wallet,
   PiggyBank,
   Ban,
-  Users
+  Users,
+  XCircle,
+  UserCog,
+  Tags
 } from 'lucide-react';
 import Link from 'next/link';
 import InfoTooltip from '@/components/InfoTooltip';
 import TrendChart from '@/components/TrendChart';
-import { aggregateCrmLeads, buildDailySeries, type KommoLeadSnapshot } from '@/lib/kommo-crm';
+import DataTable from '@/components/DataTable';
+import {
+  aggregateCrmLeads,
+  aggregateBreakdowns,
+  buildDailySeries,
+  filterLeadsByDate,
+  type KommoLeadSnapshot,
+  type NamedRef,
+} from '@/lib/kommo-crm';
 import { resolveDateRange, datesInRange, rangeToUnix } from '@/lib/date-range';
 import DateRangeFilter from '@/components/DateRangeFilter';
 
@@ -68,6 +79,9 @@ export default async function CrmClientPage({
   let atualizadoEm: string | null = null;
   let dailyLeads: { date: string; value: number }[] = [];
   let dailyWon: { date: string; value: number }[] = [];
+  let lossReasonBreakdown: ReturnType<typeof aggregateBreakdowns>['lossReasonBreakdown'] = [];
+  let responsibleBreakdown: ReturnType<typeof aggregateBreakdowns>['responsibleBreakdown'] = [];
+  let tagBreakdown: ReturnType<typeof aggregateBreakdowns>['tagBreakdown'] = [];
 
   if (!crmInt?.conta_id || !crmInt?.access_token) {
     fetchError = 'Conta de CRM não vinculada a este cliente. Configure em Configurações Gerais.';
@@ -77,6 +91,10 @@ export default async function CrmClientPage({
     const leads = (snapshot.leads || []) as KommoLeadSnapshot[];
     const recentLeads = (snapshot.recent_leads || []) as KommoLeadSnapshot[];
     const naoFechouIds = (snapshot.nao_fechou_ids || []) as number[];
+    const lossReasons = (snapshot.loss_reasons || []) as NamedRef[];
+    const users = (snapshot.users || []) as NamedRef[];
+
+    let leadsForBreakdown = leads;
 
     if (hasCustomFilter) {
       // Com filtro aplicado, os cards passam a refletir só o período
@@ -89,6 +107,7 @@ export default async function CrmClientPage({
       const series = buildDailySeries(leads, datesInRange(range));
       dailyLeads = series.dailyLeads;
       dailyWon = series.dailyWon;
+      leadsForBreakdown = filterLeadsByDate(leads, fromUnix, toUnix);
     } else {
       // Sem filtro: cards mostram o histórico completo, gráficos mostram os
       // últimos 30 dias (comportamento padrão de sempre).
@@ -97,6 +116,11 @@ export default async function CrmClientPage({
       dailyLeads = series.dailyLeads;
       dailyWon = series.dailyWon;
     }
+
+    const breakdowns = aggregateBreakdowns(leadsForBreakdown, lossReasons, users);
+    lossReasonBreakdown = breakdowns.lossReasonBreakdown;
+    responsibleBreakdown = breakdowns.responsibleBreakdown;
+    tagBreakdown = breakdowns.tagBreakdown;
     atualizadoEm = snapshot.atualizado_em;
   }
 
@@ -246,6 +270,65 @@ export default async function CrmClientPage({
                 format="currency"
               />
             </div>
+          </div>
+
+          {lossReasonBreakdown.length > 0 && (
+            <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <XCircle className="w-5 h-5 text-red-500" />
+                Motivos de Perda
+                <InfoTooltip text="Motivo cadastrado no Kommo pra cada negócio marcado como perdido, cada motivo separado." />
+              </h2>
+              <DataTable
+                getRowKey={(row: (typeof lossReasonBreakdown)[number]) => row.motivo}
+                rows={lossReasonBreakdown}
+                columns={[
+                  { key: 'motivo', label: 'Motivo', render: (r) => <span className="text-white">{r.motivo}</span> },
+                  { key: 'quantidade', label: 'Leads Perdidos', align: 'right', render: (r) => r.quantidade },
+                  { key: 'valor', label: 'Valor Perdido', align: 'right', render: (r) => formatCurrency(r.valor) },
+                ]}
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {responsibleBreakdown.length > 0 && (
+              <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+                <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  <UserCog className="w-5 h-5 text-zinc-500" />
+                  Performance por Responsável
+                  <InfoTooltip text="Oportunidades, leads ganhos e valor ganho separados por responsável no Kommo." />
+                </h2>
+                <DataTable
+                  getRowKey={(row: (typeof responsibleBreakdown)[number]) => row.responsavel}
+                  rows={responsibleBreakdown}
+                  columns={[
+                    { key: 'responsavel', label: 'Responsável', render: (r) => <span className="text-white">{r.responsavel}</span> },
+                    { key: 'oportunidades', label: 'Oportunidades', align: 'right', render: (r) => r.oportunidades },
+                    { key: 'ganhas', label: 'Ganhas', align: 'right', render: (r) => r.ganhas },
+                    { key: 'valorGanho', label: 'Valor Ganho', align: 'right', render: (r) => formatCurrency(r.valorGanho) },
+                  ]}
+                />
+              </div>
+            )}
+
+            {tagBreakdown.length > 0 && (
+              <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+                <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  <Tags className="w-5 h-5 text-zinc-500" />
+                  Tags mais usadas
+                  <InfoTooltip text="Tags aplicadas aos leads no Kommo, cada uma separada — top 20." />
+                </h2>
+                <DataTable
+                  getRowKey={(row: (typeof tagBreakdown)[number]) => row.tag}
+                  rows={tagBreakdown}
+                  columns={[
+                    { key: 'tag', label: 'Tag', render: (r) => <span className="text-white">{r.tag}</span> },
+                    { key: 'quantidade', label: 'Leads', align: 'right', render: (r) => r.quantidade },
+                  ]}
+                />
+              </div>
+            )}
           </div>
         </>
       )}
