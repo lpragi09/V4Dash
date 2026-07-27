@@ -43,10 +43,10 @@ export default function DashboardHeader() {
         {/* Logo */}
         <div className="flex-shrink-0">
           <Link href="/dashboard" className="font-serif font-bold text-2xl tracking-tight text-white flex items-center gap-3">
-            <div className="w-10 h-10 relative flex items-center justify-center">
-              <Image src="/v4logo.png" alt="V4 Company Logo" fill className="object-contain" priority />
+            <div className="w-10 h-10 relative flex items-center justify-center rounded-lg overflow-hidden">
+              <Image src="/v4logo.png" alt="V4 Company Logo" fill className="object-cover" priority />
             </div>
-            Dash-V4
+            <span className="italic">Dash<span className="text-red-500 not-italic">V4</span></span>
           </Link>
         </div>
 

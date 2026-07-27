@@ -60,8 +60,8 @@ function LoginContent() {
         
         <div className="relative z-10 max-w-lg">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 relative flex items-center justify-center bg-zinc-100 rounded">
-              <img src="/v4logo.png" alt="V4 Logo" className="w-8 h-8 object-contain" />
+            <div className="w-10 h-10 relative flex items-center justify-center rounded-lg overflow-hidden">
+              <img src="/v4logo.png" alt="V4 Logo" className="w-full h-full object-cover" />
             </div>
             <p className="text-zinc-500 text-xs font-semibold tracking-[0.2em]">
               — SISTEMA ADM V4

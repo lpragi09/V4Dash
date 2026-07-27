@@ -53,10 +53,12 @@ export default function Sidebar() {
       {/* Logo & Client Selector */}
       <div className="p-6 border-b border-zinc-800/50">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-8 h-8 relative flex items-center justify-center bg-white rounded">
-            <img src="/v4logo.png" alt="V4 Logo" className="w-6 h-6 object-contain" />
+          <div className="w-9 h-9 relative flex items-center justify-center rounded-lg overflow-hidden shrink-0">
+            <img src="/v4logo.png" alt="V4 Logo" className="w-full h-full object-cover" />
           </div>
-          <span className="font-serif font-bold text-xl text-white tracking-tight">Dash-V4</span>
+          <span className="font-serif italic font-bold text-xl text-white tracking-tight">
+            Dash<span className="text-red-500 not-italic">V4</span>
+          </span>
         </div>
 
         {/* Client Selector */}
