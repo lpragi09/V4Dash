@@ -391,7 +391,7 @@ export default async function GoogleAdsClientPage({
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Gastos (Google)
                   <InfoTooltip text="Valor total investido em campanhas do Google Ads no período." />
@@ -403,7 +403,7 @@ export default async function GoogleAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Leads (Google)
                   <InfoTooltip text="Número de conversões registradas nas campanhas do Google Ads." />
@@ -415,7 +415,7 @@ export default async function GoogleAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Custo por Lead
                   <InfoTooltip text="Gasto total dividido pelo número de conversões geradas (CPL)." />
@@ -427,7 +427,7 @@ export default async function GoogleAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Cliques
                   <InfoTooltip text="Quantidade de cliques nos anúncios do Google Ads." />
@@ -439,7 +439,7 @@ export default async function GoogleAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Impressões
                   <InfoTooltip text="Número de vezes que os anúncios foram exibidos." />
@@ -451,7 +451,7 @@ export default async function GoogleAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   CTR
                   <InfoTooltip text="Taxa de cliques: percentual de impressões que resultaram em clique." />
@@ -463,7 +463,7 @@ export default async function GoogleAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   CPC Médio
                   <InfoTooltip text="Valor médio pago por clique." />
@@ -476,7 +476,7 @@ export default async function GoogleAdsClientPage({
 
             {dashboardData.valorConversao > 0 && (
               <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-                <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                   <span className="flex items-center gap-1.5">
                     Valor de Conversão
                     <InfoTooltip text="Valor monetário total atribuído às conversões rastreadas no Google Ads no período." />
@@ -490,7 +490,7 @@ export default async function GoogleAdsClientPage({
 
             {dashboardData.impressionShare > 0 && (
               <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-                <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                   <span className="flex items-center gap-1.5">
                     Impression Share (Pesquisa)
                     <InfoTooltip text="Percentual de impressões que suas campanhas de pesquisa receberam em relação ao total que poderiam ter recebido." />

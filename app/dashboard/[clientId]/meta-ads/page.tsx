@@ -448,7 +448,7 @@ export default async function MetaAdsClientPage({
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Gasto Total
                   <InfoTooltip text="Valor total investido em anúncios no Meta (Facebook e Instagram) no período." />
@@ -460,7 +460,7 @@ export default async function MetaAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Leads
                   <InfoTooltip text="Número de leads gerados através dos formulários e ações de conversão configuradas nas campanhas." />
@@ -472,7 +472,7 @@ export default async function MetaAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Custo por Lead
                   <InfoTooltip text="Gasto total dividido pelo número de leads gerados (CPL)." />
@@ -484,7 +484,7 @@ export default async function MetaAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Cliques no Link
                   <InfoTooltip text="Quantidade de cliques nos links dos anúncios." />
@@ -496,7 +496,7 @@ export default async function MetaAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Impressões
                   <InfoTooltip text="Número de vezes que os anúncios foram exibidos." />
@@ -508,7 +508,7 @@ export default async function MetaAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Alcance
                   <InfoTooltip text="Número de pessoas únicas que viram os anúncios." />
@@ -520,7 +520,7 @@ export default async function MetaAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Frequência
                   <InfoTooltip text="Média de vezes que cada pessoa viu o anúncio (Impressões ÷ Alcance)." />
@@ -532,7 +532,7 @@ export default async function MetaAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   CTR
                   <InfoTooltip text="Taxa de cliques: percentual de impressões que resultaram em clique." />
@@ -544,7 +544,7 @@ export default async function MetaAdsClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   CPM
                   <InfoTooltip text="Custo por mil impressões." />
@@ -574,7 +574,7 @@ export default async function MetaAdsClientPage({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {videoPlays > 0 && (
                 <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-                  <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                  <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                     <span className="flex items-center gap-1.5">
                       Reproduções de Vídeo
                       <InfoTooltip text="Número de vezes que os vídeos dos anúncios foram reproduzidos." />
@@ -586,7 +586,7 @@ export default async function MetaAdsClientPage({
               )}
               {videoAvgWatchSec > 0 && (
                 <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-                  <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                  <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                     <span className="flex items-center gap-1.5">
                       Tempo Médio Assistido
                       <InfoTooltip text="Média de segundos que as pessoas assistiram aos vídeos dos anúncios." />
@@ -598,7 +598,7 @@ export default async function MetaAdsClientPage({
               )}
               {valorConversao > 0 && (
                 <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-                  <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+                  <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                     <span className="flex items-center gap-1.5">
                       Valor de Conversão
                       <InfoTooltip text="Valor monetário total atribuído às compras/conversões rastreadas pelo pixel do Meta no período." />

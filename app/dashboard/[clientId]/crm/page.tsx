@@ -175,7 +175,7 @@ export default async function CrmClientPage({
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Total de Oportunidades
                   <InfoTooltip text="Número total de leads/negócios registrados no CRM no período." />
@@ -210,7 +210,7 @@ export default async function CrmClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Valor dos Leads Ganhos
                   <InfoTooltip text="Soma do valor de todos os leads marcados como ganhos no funil. É o valor dos negócios ganhos no CRM, não uma contagem auditada de vendas — um mesmo cliente pode ter mais de um lead ganho." />
@@ -221,7 +221,7 @@ export default async function CrmClientPage({
             </div>
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
-              <h3 className="text-zinc-400 font-medium mb-4 flex items-center justify-between">
+              <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
                 <span className="flex items-center gap-1.5">
                   Valor em Pipeline
                   <InfoTooltip text="Soma do valor dos negócios ainda em andamento (nem ganhos, nem perdidos, nem no estágio 'Não Fechou')." />
