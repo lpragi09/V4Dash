@@ -9,6 +9,8 @@ interface BrazilMapProps {
   format?: 'currency' | 'number';
   /** Cor de destaque em hex, ex: '#3b82f6' (azul, usado no Meta Ads). */
   accentColor?: string;
+  /** Cidades por sigla de estado, pra mostrar no tooltip abaixo do total (top N já vem pronto de quem chama). */
+  citiesByState?: Record<string, { nome: string; valor: number }[]>;
 }
 
 // Funções não podem ser passadas de Server Component pra Client Component —
@@ -20,7 +22,7 @@ const formatValue = (value: number, format: 'currency' | 'number'): string =>
     : new Intl.NumberFormat('pt-BR').format(value);
 
 /** Mapa coroplético do Brasil — cor mais forte = valor maior. Estados sem dado ficam cinza neutro. */
-export default function BrazilMap({ data, format = 'currency', accentColor = '#3b82f6' }: BrazilMapProps) {
+export default function BrazilMap({ data, format = 'currency', accentColor = '#3b82f6', citiesByState }: BrazilMapProps) {
   const values = Object.values(data).filter((v) => v > 0);
   const max = values.length > 0 ? Math.max(...values) : 0;
 
@@ -31,6 +33,17 @@ export default function BrazilMap({ data, format = 'currency', accentColor = '#3
         const intensity = max > 0 ? value / max : 0;
         const fill = value > 0 ? accentColor : '#27272a';
         const fillOpacity = value > 0 ? 0.25 + intensity * 0.75 : 1;
+        const cities = citiesByState?.[state.sigla];
+
+        // Tooltip nativo do SVG (<title>) respeita quebra de linha — dá pra
+        // listar as cidades embaixo do total sem precisar de tooltip custom.
+        const tooltipLines = [`${state.name}: ${formatValue(value, format)}`];
+        if (cities && cities.length > 0) {
+          tooltipLines.push('');
+          for (const city of cities) {
+            tooltipLines.push(`${city.nome}: ${formatValue(city.valor, format)}`);
+          }
+        }
 
         return (
           <path
@@ -42,9 +55,7 @@ export default function BrazilMap({ data, format = 'currency', accentColor = '#3
             strokeWidth={0.8}
             className="transition-opacity hover:opacity-80"
           >
-            <title>
-              {state.name}: {formatValue(value, format)}
-            </title>
+            <title>{tooltipLines.join('\n')}</title>
           </path>
         );
       })}

@@ -11,15 +11,18 @@ import {
   Eye,
   Percent,
   Smartphone,
-  Target
+  Target,
+  MapPin
 } from 'lucide-react';
 import Link from 'next/link';
 import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
 import ComparisonBadge from '@/components/ComparisonBadge';
 import DataTable from '@/components/DataTable';
+import BrazilMap from '@/components/BrazilMap';
 import { getValidAgencyGoogleToken } from '@/lib/google-agency';
 import { resolveDateRange, previousDateRange, datesInRange } from '@/lib/date-range';
+import { findBrazilStateByName } from '@/lib/brazil-states';
 import DateRangeFilter from '@/components/DateRangeFilter';
 
 export const dynamic = 'force-dynamic';
@@ -87,6 +90,11 @@ interface GoogleGenderRow {
   gastos: number;
   cliques: number;
   conversoes: number;
+}
+
+interface GoogleGeography {
+  regions: Record<string, number>;
+  citiesByState: Record<string, { nome: string; valor: number }[]>;
 }
 
 const MATCH_TYPE_LABELS: Record<string, string> = {
@@ -295,6 +303,84 @@ async function fetchGoogleGenders(
   return Array.from(byType.values()).sort((a, b) => b.gastos - a.gastos);
 }
 
+function extractGeoId(resourceName?: string): string | null {
+  if (!resourceName) return null;
+  const id = resourceName.split('/').pop();
+  return id || null;
+}
+
+/**
+ * Busca gasto por estado e por cidade dentro de cada estado (geographic_view),
+ * e resolve os IDs de geo_target_constant pros nomes de verdade numa segunda
+ * consulta — a primeira só retorna o resource name (ex: geoTargetConstants/20135).
+ */
+async function fetchGoogleGeography(
+  customerId: string,
+  headers: Record<string, string>,
+  range: { since: string; until: string }
+): Promise<GoogleGeography> {
+  const query = `SELECT segments.geo_target_state, segments.geo_target_city, metrics.cost_micros, metrics.clicks, metrics.conversions FROM geographic_view WHERE segments.date BETWEEN '${range.since}' AND '${range.until}'`;
+  const body = await googleSearch(customerId, headers, query);
+  const rows: {
+    segments?: { geoTargetState?: string; geoTargetCity?: string };
+    metrics?: Record<string, unknown>;
+  }[] = body.results || [];
+
+  const stateIds = new Set<string>();
+  const cityIds = new Set<string>();
+  for (const row of rows) {
+    const stateId = extractGeoId(row.segments?.geoTargetState);
+    const cityId = extractGeoId(row.segments?.geoTargetCity);
+    if (stateId) stateIds.add(stateId);
+    if (cityId) cityIds.add(cityId);
+  }
+
+  const allIds = [...stateIds, ...cityIds];
+  const nameById = new Map<string, string>();
+  if (allIds.length > 0) {
+    const idsQuery = `SELECT geo_target_constant.id, geo_target_constant.name FROM geo_target_constant WHERE geo_target_constant.id IN (${allIds.join(',')})`;
+    const idsBody = await googleSearch(customerId, headers, idsQuery);
+    const idRows: { geoTargetConstant?: { id?: string; name?: string } }[] = idsBody.results || [];
+    for (const row of idRows) {
+      if (row.geoTargetConstant?.id && row.geoTargetConstant?.name) {
+        nameById.set(String(row.geoTargetConstant.id), row.geoTargetConstant.name);
+      }
+    }
+  }
+
+  const regions: Record<string, number> = {};
+  const cityValuesByState = new Map<string, Map<string, number>>();
+
+  for (const row of rows) {
+    const gastos = Number(row.metrics?.costMicros || 0) / 1_000_000;
+    const stateId = extractGeoId(row.segments?.geoTargetState);
+    const stateName = stateId ? nameById.get(stateId) : null;
+    const match = stateName ? findBrazilStateByName(stateName) : undefined;
+
+    if (match) {
+      regions[match.sigla] = (regions[match.sigla] || 0) + gastos;
+
+      const cityId = extractGeoId(row.segments?.geoTargetCity);
+      const cityName = cityId ? nameById.get(cityId) : null;
+      if (cityName) {
+        const stateCities = cityValuesByState.get(match.sigla) || new Map<string, number>();
+        stateCities.set(cityName, (stateCities.get(cityName) || 0) + gastos);
+        cityValuesByState.set(match.sigla, stateCities);
+      }
+    }
+  }
+
+  const citiesByState: Record<string, { nome: string; valor: number }[]> = {};
+  for (const [sigla, cityMap] of cityValuesByState) {
+    citiesByState[sigla] = Array.from(cityMap.entries())
+      .map(([nome, valor]) => ({ nome, valor }))
+      .sort((a, b) => b.valor - a.valor)
+      .slice(0, 8);
+  }
+
+  return { regions, citiesByState };
+}
+
 export default async function GoogleAdsClientPage({
   params,
   searchParams,
@@ -337,6 +423,7 @@ export default async function GoogleAdsClientPage({
   let devices: GoogleDeviceRow[] = [];
   let ageRanges: GoogleAgeRow[] = [];
   let genders: GoogleGenderRow[] = [];
+  let geography: GoogleGeography = { regions: {}, citiesByState: {} };
 
   if (!accessToken) {
     fetchError = "Google Ads não autorizado pela agência. Autorize em Configurações Gerais.";
@@ -404,13 +491,14 @@ export default async function GoogleAdsClientPage({
       // Detalhamentos extras (campanha, termos de pesquisa, palavras-chave,
       // dispositivo) são independentes do card principal — se um falhar, só
       // essa seção específica some, o resto da página continua normal.
-      const [campaignsSettled, searchTermsSettled, keywordsSettled, devicesSettled, ageSettled, genderSettled] = await Promise.allSettled([
+      const [campaignsSettled, searchTermsSettled, keywordsSettled, devicesSettled, ageSettled, genderSettled, geographySettled] = await Promise.allSettled([
         fetchGoogleCampaigns(customerId, headers, current),
         fetchGoogleSearchTerms(customerId, headers, current),
         fetchGoogleKeywords(customerId, headers, current),
         fetchGoogleDevices(customerId, headers, current),
         fetchGoogleAgeRanges(customerId, headers, current),
         fetchGoogleGenders(customerId, headers, current),
+        fetchGoogleGeography(customerId, headers, current),
       ]);
 
       if (campaignsSettled.status === 'fulfilled') campaigns = campaignsSettled.value;
@@ -430,6 +518,9 @@ export default async function GoogleAdsClientPage({
 
       if (genderSettled.status === 'fulfilled') genders = genderSettled.value;
       else console.error('Error fetching Google genders:', genderSettled.reason);
+
+      if (geographySettled.status === 'fulfilled') geography = geographySettled.value;
+      else console.error('Error fetching Google geography:', geographySettled.reason);
     } catch (err) {
       dashboardData = null;
       fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do Google Ads.";
@@ -731,6 +822,30 @@ export default async function GoogleAdsClientPage({
                   />
                 </div>
               )}
+            </div>
+          )}
+
+          {Object.keys(geography.regions).length > 0 && (
+            <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-emerald-500" />
+                Alcance por Região
+                <InfoTooltip text="Gasto por estado do Brasil. Passe o mouse sobre um estado pra ver as principais cidades dentro dele." />
+              </h2>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+                <BrazilMap data={geography.regions} format="currency" accentColor="#10b981" citiesByState={geography.citiesByState} />
+                <DataTable
+                  getRowKey={(row: { sigla: string; gastos: number }) => row.sigla}
+                  rows={Object.entries(geography.regions)
+                    .map(([sigla, gastos]) => ({ sigla, gastos }))
+                    .sort((a, b) => b.gastos - a.gastos)
+                    .slice(0, 15)}
+                  columns={[
+                    { key: 'sigla', label: 'Estado', render: (r) => <span className="text-white">{r.sigla}</span> },
+                    { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                  ]}
+                />
+              </div>
             </div>
           )}
         </>
