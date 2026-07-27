@@ -50,7 +50,7 @@ export default function InfoTooltip({ text }: InfoTooltipProps) {
         onMouseLeave={close}
         onFocus={open}
         onBlur={close}
-        className="text-zinc-600 hover:text-zinc-300 transition-colors"
+        className="inline-block align-middle ml-1.5 text-zinc-600 hover:text-zinc-300 transition-colors"
         aria-label="Mais informações"
       >
         <Info className="w-3.5 h-3.5" />

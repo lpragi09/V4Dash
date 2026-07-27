@@ -75,6 +75,20 @@ interface GoogleDeviceRow {
   conversoes: number;
 }
 
+interface GoogleAgeRow {
+  faixaEtaria: string;
+  gastos: number;
+  cliques: number;
+  conversoes: number;
+}
+
+interface GoogleGenderRow {
+  genero: string;
+  gastos: number;
+  cliques: number;
+  conversoes: number;
+}
+
 const MATCH_TYPE_LABELS: Record<string, string> = {
   EXACT: 'Exata',
   PHRASE: 'Frase',
@@ -87,6 +101,20 @@ const DEVICE_LABELS: Record<string, string> = {
   TABLET: 'Tablet',
   CONNECTED_TV: 'TV Conectada',
   OTHER: 'Outro',
+};
+
+const AGE_RANGE_LABELS: Record<string, string> = {
+  AGE_RANGE_18_24: '18-24',
+  AGE_RANGE_25_34: '25-34',
+  AGE_RANGE_35_44: '35-44',
+  AGE_RANGE_45_54: '45-54',
+  AGE_RANGE_55_64: '55-64',
+  AGE_RANGE_65_UP: '65+',
+};
+
+const GENDER_LABELS: Record<string, string> = {
+  GENDER_MALE: 'Masculino',
+  GENDER_FEMALE: 'Feminino',
 };
 
 const CAMPAIGN_STATUS_LABELS: Record<string, string> = {
@@ -219,6 +247,54 @@ async function fetchGoogleDevices(
     .sort((a, b) => b.gastos - a.gastos);
 }
 
+async function fetchGoogleAgeRanges(
+  customerId: string,
+  headers: Record<string, string>,
+  range: { since: string; until: string }
+): Promise<GoogleAgeRow[]> {
+  const query = `SELECT ad_group_criterion.age_range.type, metrics.cost_micros, metrics.clicks, metrics.conversions FROM age_range_view WHERE segments.date BETWEEN '${range.since}' AND '${range.until}'`;
+  const body = await googleSearch(customerId, headers, query);
+  const rows: { adGroupCriterion?: { ageRange?: { type?: string } }; metrics?: Record<string, unknown> }[] = body.results || [];
+
+  const byType = new Map<string, GoogleAgeRow>();
+  for (const row of rows) {
+    const type = row.adGroupCriterion?.ageRange?.type || '';
+    const label = AGE_RANGE_LABELS[type];
+    if (!label) continue; // ignora UNDETERMINED e valores desconhecidos, é ruído sem valor no relatório
+    const entry = byType.get(label) || { faixaEtaria: label, gastos: 0, cliques: 0, conversoes: 0 };
+    entry.gastos += Number(row.metrics?.costMicros || 0) / 1_000_000;
+    entry.cliques += Number(row.metrics?.clicks || 0);
+    entry.conversoes += Number(row.metrics?.conversions || 0);
+    byType.set(label, entry);
+  }
+
+  return Array.from(byType.values()).sort((a, b) => parseInt(a.faixaEtaria, 10) - parseInt(b.faixaEtaria, 10));
+}
+
+async function fetchGoogleGenders(
+  customerId: string,
+  headers: Record<string, string>,
+  range: { since: string; until: string }
+): Promise<GoogleGenderRow[]> {
+  const query = `SELECT ad_group_criterion.gender.type, metrics.cost_micros, metrics.clicks, metrics.conversions FROM gender_view WHERE segments.date BETWEEN '${range.since}' AND '${range.until}'`;
+  const body = await googleSearch(customerId, headers, query);
+  const rows: { adGroupCriterion?: { gender?: { type?: string } }; metrics?: Record<string, unknown> }[] = body.results || [];
+
+  const byType = new Map<string, GoogleGenderRow>();
+  for (const row of rows) {
+    const type = row.adGroupCriterion?.gender?.type || '';
+    const label = GENDER_LABELS[type];
+    if (!label) continue; // ignora UNDETERMINED
+    const entry = byType.get(label) || { genero: label, gastos: 0, cliques: 0, conversoes: 0 };
+    entry.gastos += Number(row.metrics?.costMicros || 0) / 1_000_000;
+    entry.cliques += Number(row.metrics?.clicks || 0);
+    entry.conversoes += Number(row.metrics?.conversions || 0);
+    byType.set(label, entry);
+  }
+
+  return Array.from(byType.values()).sort((a, b) => b.gastos - a.gastos);
+}
+
 export default async function GoogleAdsClientPage({
   params,
   searchParams,
@@ -259,6 +335,8 @@ export default async function GoogleAdsClientPage({
   let searchTerms: GoogleSearchTermRow[] = [];
   let keywords: GoogleKeywordRow[] = [];
   let devices: GoogleDeviceRow[] = [];
+  let ageRanges: GoogleAgeRow[] = [];
+  let genders: GoogleGenderRow[] = [];
 
   if (!accessToken) {
     fetchError = "Google Ads não autorizado pela agência. Autorize em Configurações Gerais.";
@@ -326,11 +404,13 @@ export default async function GoogleAdsClientPage({
       // Detalhamentos extras (campanha, termos de pesquisa, palavras-chave,
       // dispositivo) são independentes do card principal — se um falhar, só
       // essa seção específica some, o resto da página continua normal.
-      const [campaignsSettled, searchTermsSettled, keywordsSettled, devicesSettled] = await Promise.allSettled([
+      const [campaignsSettled, searchTermsSettled, keywordsSettled, devicesSettled, ageSettled, genderSettled] = await Promise.allSettled([
         fetchGoogleCampaigns(customerId, headers, current),
         fetchGoogleSearchTerms(customerId, headers, current),
         fetchGoogleKeywords(customerId, headers, current),
         fetchGoogleDevices(customerId, headers, current),
+        fetchGoogleAgeRanges(customerId, headers, current),
+        fetchGoogleGenders(customerId, headers, current),
       ]);
 
       if (campaignsSettled.status === 'fulfilled') campaigns = campaignsSettled.value;
@@ -344,6 +424,12 @@ export default async function GoogleAdsClientPage({
 
       if (devicesSettled.status === 'fulfilled') devices = devicesSettled.value;
       else console.error('Error fetching Google devices breakdown:', devicesSettled.reason);
+
+      if (ageSettled.status === 'fulfilled') ageRanges = ageSettled.value;
+      else console.error('Error fetching Google age ranges:', ageSettled.reason);
+
+      if (genderSettled.status === 'fulfilled') genders = genderSettled.value;
+      else console.error('Error fetching Google genders:', genderSettled.reason);
     } catch (err) {
       dashboardData = null;
       fetchError = err instanceof Error ? err.message : "Erro ao conectar com a API do Google Ads.";
@@ -392,7 +478,7 @@ export default async function GoogleAdsClientPage({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Gastos (Google)
                   <InfoTooltip text="Valor total investido em campanhas do Google Ads no período." />
                 </span>
@@ -404,7 +490,7 @@ export default async function GoogleAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Leads (Google)
                   <InfoTooltip text="Número de conversões registradas nas campanhas do Google Ads." />
                 </span>
@@ -416,7 +502,7 @@ export default async function GoogleAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Custo por Lead
                   <InfoTooltip text="Gasto total dividido pelo número de conversões geradas (CPL)." />
                 </span>
@@ -428,7 +514,7 @@ export default async function GoogleAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Cliques
                   <InfoTooltip text="Quantidade de cliques nos anúncios do Google Ads." />
                 </span>
@@ -440,7 +526,7 @@ export default async function GoogleAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Impressões
                   <InfoTooltip text="Número de vezes que os anúncios foram exibidos." />
                 </span>
@@ -452,7 +538,7 @@ export default async function GoogleAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   CTR
                   <InfoTooltip text="Taxa de cliques: percentual de impressões que resultaram em clique." />
                 </span>
@@ -464,7 +550,7 @@ export default async function GoogleAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   CPC Médio
                   <InfoTooltip text="Valor médio pago por clique." />
                 </span>
@@ -477,7 +563,7 @@ export default async function GoogleAdsClientPage({
             {dashboardData.valorConversao > 0 && (
               <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
                 <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                  <span className="flex items-center gap-1.5">
+                  <span className="inline">
                     Valor de Conversão
                     <InfoTooltip text="Valor monetário total atribuído às conversões rastreadas no Google Ads no período." />
                   </span>
@@ -491,7 +577,7 @@ export default async function GoogleAdsClientPage({
             {dashboardData.impressionShare > 0 && (
               <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
                 <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                  <span className="flex items-center gap-1.5">
+                  <span className="inline">
                     Impression Share (Pesquisa)
                     <InfoTooltip text="Percentual de impressões que suas campanhas de pesquisa receberam em relação ao total que poderiam ter recebido." />
                   </span>
@@ -603,6 +689,48 @@ export default async function GoogleAdsClientPage({
                   { key: 'conversoes', label: 'Conversões', align: 'right', render: (r) => r.conversoes },
                 ]}
               />
+            </div>
+          )}
+
+          {(ageRanges.length > 0 || genders.length > 0) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {ageRanges.length > 0 && (
+                <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+                  <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                    Público por Idade
+                    <InfoTooltip text="Gasto, cliques e conversões por faixa etária, ordenado da mais nova pra mais velha." />
+                  </h2>
+                  <DataTable
+                    getRowKey={(row: GoogleAgeRow) => row.faixaEtaria}
+                    rows={ageRanges}
+                    columns={[
+                      { key: 'faixaEtaria', label: 'Faixa Etária', render: (r) => <span className="text-white">{r.faixaEtaria}</span> },
+                      { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                      { key: 'cliques', label: 'Cliques', align: 'right', render: (r) => r.cliques },
+                      { key: 'conversoes', label: 'Conversões', align: 'right', render: (r) => r.conversoes },
+                    ]}
+                  />
+                </div>
+              )}
+
+              {genders.length > 0 && (
+                <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+                  <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                    Público por Gênero
+                    <InfoTooltip text="Gasto, cliques e conversões por gênero." />
+                  </h2>
+                  <DataTable
+                    getRowKey={(row: GoogleGenderRow) => row.genero}
+                    rows={genders}
+                    columns={[
+                      { key: 'genero', label: 'Gênero', render: (r) => <span className="text-white">{r.genero}</span> },
+                      { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                      { key: 'cliques', label: 'Cliques', align: 'right', render: (r) => r.cliques },
+                      { key: 'conversoes', label: 'Conversões', align: 'right', render: (r) => r.conversoes },
+                    ]}
+                  />
+                </div>
+              )}
             </div>
           )}
         </>

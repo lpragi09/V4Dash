@@ -110,6 +110,25 @@ function findActionValue(actions: MetaActionValue[] | undefined, type: string): 
   return found ? parseFloat(found.value) : 0;
 }
 
+// "Lead" não é sempre o mesmo action_type — depende de como a campanha está
+// configurada (formulário instantâneo, Pixel no site, clique pra WhatsApp/
+// Messenger). Somamos todos os tipos conhecidos de "lead" em vez de só um,
+// senão contas que não usam Formulário Instantâneo aparecem com 0 leads
+// mesmo tendo conversão de verdade.
+const LEAD_ACTION_TYPES = [
+  'lead',
+  'onsite_conversion.lead_grouped',
+  'offsite_conversion.fb_pixel_lead',
+  'onsite_conversion.messaging_conversation_started_7d',
+];
+
+function findLeadValue(actions: MetaActionValue[] | undefined): number {
+  if (!actions) return 0;
+  return actions
+    .filter((a) => LEAD_ACTION_TYPES.includes(a.action_type))
+    .reduce((sum, a) => sum + parseFloat(a.value), 0);
+}
+
 async function fetchMetaJson(url: string): Promise<{ data?: unknown[]; error?: { message?: string } }> {
   const res = await fetch(url, { cache: 'no-store' });
   return res.json();
@@ -146,7 +165,7 @@ async function fetchMetaCampaigns(
       nome: row.campaign_name,
       status: statusMap.get(row.campaign_id) || '—',
       gastos: parseFloat(row.spend || '0'),
-      leads: findActionValue(row.actions, 'lead'),
+      leads: findLeadValue(row.actions),
       cliques: parseInt(row.clicks || '0', 10),
       ctr: parseFloat(row.ctr || '0'),
     }))
@@ -221,7 +240,7 @@ async function fetchMetaDemographics(
       faixaEtaria: row.age!,
       genero: row.gender === 'male' ? 'Masculino' : 'Feminino',
       gastos: parseFloat(row.spend || '0'),
-      leads: findActionValue(row.actions, 'lead'),
+      leads: findLeadValue(row.actions),
     }))
     .filter((row) => row.gastos >= 1)
     .sort((a, b) => {
@@ -248,7 +267,7 @@ async function fetchMetaPlatforms(
     .map((row) => ({
       plataforma: labels[row.publisher_platform || ''] || row.publisher_platform || '—',
       gastos: parseFloat(row.spend || '0'),
-      leads: findActionValue(row.actions, 'lead'),
+      leads: findLeadValue(row.actions),
       impressoes: parseInt(row.impressions || '0', 10),
     }))
     .sort((a, b) => b.gastos - a.gastos);
@@ -271,7 +290,7 @@ async function fetchMetaRegions(
     // "Unknown" é ruído de atribuição do Meta (não dá pra localizar o estado), sem valor pro relatório.
     if (!row.region || row.region.toLowerCase() === 'unknown') continue;
     const gastos = parseFloat(row.spend || '0');
-    const leads = findActionValue(row.actions, 'lead');
+    const leads = findLeadValue(row.actions);
     const match = findBrazilStateByName(row.region);
     const key = match?.sigla || row.region;
     const existing = bySigla.get(key);
@@ -309,11 +328,7 @@ async function fetchMetaAggregate(
 
   const insights = responseData.data && responseData.data.length > 0 ? responseData.data[0] : null;
 
-  let leadsCount = 0;
-  if (insights?.actions) {
-    const leadAction = (insights.actions as { action_type: string; value: string }[]).find((a) => a.action_type === 'lead');
-    if (leadAction) leadsCount = parseInt(leadAction.value, 10);
-  }
+  const leadsCount = findLeadValue(insights?.actions as MetaActionValue[] | undefined);
 
   const spend = insights ? parseFloat(insights.spend || '0') : 0;
 
@@ -415,10 +430,7 @@ export default async function MetaAdsClientPage({
         );
         dailyLeads = alignSeries(
           dateRange,
-          dailyRows.map((row) => {
-            const leadAction = row.actions?.find((a) => a.action_type === 'lead');
-            return { date: row.date_start, value: leadAction ? parseInt(leadAction.value, 10) : 0 };
-          })
+          dailyRows.map((row) => ({ date: row.date_start, value: findLeadValue(row.actions) }))
         );
       } else {
         console.error('Error fetching daily Meta Ads series:', dailySettled.reason);
@@ -506,7 +518,7 @@ export default async function MetaAdsClientPage({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Gasto Total
                   <InfoTooltip text="Valor total investido em anúncios no Meta (Facebook e Instagram) no período." />
                 </span>
@@ -518,7 +530,7 @@ export default async function MetaAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Leads
                   <InfoTooltip text="Número de leads gerados através dos formulários e ações de conversão configuradas nas campanhas." />
                 </span>
@@ -530,7 +542,7 @@ export default async function MetaAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Custo por Lead
                   <InfoTooltip text="Gasto total dividido pelo número de leads gerados (CPL)." />
                 </span>
@@ -542,7 +554,7 @@ export default async function MetaAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Cliques no Link
                   <InfoTooltip text="Quantidade de cliques nos links dos anúncios." />
                 </span>
@@ -554,7 +566,7 @@ export default async function MetaAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Impressões
                   <InfoTooltip text="Número de vezes que os anúncios foram exibidos." />
                 </span>
@@ -566,7 +578,7 @@ export default async function MetaAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Alcance
                   <InfoTooltip text="Número de pessoas únicas que viram os anúncios." />
                 </span>
@@ -578,7 +590,7 @@ export default async function MetaAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Frequência
                   <InfoTooltip text="Média de vezes que cada pessoa viu o anúncio (Impressões ÷ Alcance)." />
                 </span>
@@ -590,7 +602,7 @@ export default async function MetaAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   CTR
                   <InfoTooltip text="Taxa de cliques: percentual de impressões que resultaram em clique." />
                 </span>
@@ -602,7 +614,7 @@ export default async function MetaAdsClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   CPM
                   <InfoTooltip text="Custo por mil impressões." />
                 </span>
@@ -632,7 +644,7 @@ export default async function MetaAdsClientPage({
               {videoPlays > 0 && (
                 <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
                   <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                    <span className="flex items-center gap-1.5">
+                    <span className="inline">
                       Reproduções de Vídeo
                       <InfoTooltip text="Número de vezes que os vídeos dos anúncios foram reproduzidos." />
                     </span>
@@ -644,7 +656,7 @@ export default async function MetaAdsClientPage({
               {videoAvgWatchSec > 0 && (
                 <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
                   <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                    <span className="flex items-center gap-1.5">
+                    <span className="inline">
                       Tempo Médio Assistido
                       <InfoTooltip text="Média de segundos que as pessoas assistiram aos vídeos dos anúncios." />
                     </span>
@@ -656,7 +668,7 @@ export default async function MetaAdsClientPage({
               {valorConversao > 0 && (
                 <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
                   <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                    <span className="flex items-center gap-1.5">
+                    <span className="inline">
                       Valor de Conversão
                       <InfoTooltip text="Valor monetário total atribuído às compras/conversões rastreadas pelo pixel do Meta no período." />
                     </span>

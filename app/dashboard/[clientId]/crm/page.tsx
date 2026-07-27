@@ -176,7 +176,7 @@ export default async function CrmClientPage({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Total de Oportunidades
                   <InfoTooltip text="Número total de leads/negócios registrados no CRM no período." />
                 </span>
@@ -188,7 +188,7 @@ export default async function CrmClientPage({
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative group">
               <div className="absolute inset-0 rounded-2xl bg-emerald-500/5 transition-colors group-hover:bg-emerald-500/10" />
               <h3 className="text-emerald-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Leads Ganhos
                   <InfoTooltip text="Leads/negócios marcados como ganhos no funil do CRM. Não corresponde necessariamente ao número de vendas únicas — um mesmo cliente pode gerar mais de um lead ganho." />
                 </span>
@@ -200,7 +200,7 @@ export default async function CrmClientPage({
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative group">
               <div className="absolute inset-0 rounded-2xl bg-red-500/5 transition-colors group-hover:bg-red-500/10" />
               <h3 className="text-red-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Oportunidades Perdidas
                   <InfoTooltip text="Negócios marcados como perdidos no período." />
                 </span>
@@ -211,7 +211,7 @@ export default async function CrmClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Valor dos Leads Ganhos
                   <InfoTooltip text="Soma do valor de todos os leads marcados como ganhos no funil. É o valor dos negócios ganhos no CRM, não uma contagem auditada de vendas — um mesmo cliente pode ter mais de um lead ganho." />
                 </span>
@@ -222,7 +222,7 @@ export default async function CrmClientPage({
 
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6">
               <h3 className="text-zinc-400 font-medium mb-4 flex items-start justify-between gap-2">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Valor em Pipeline
                   <InfoTooltip text="Soma do valor dos negócios ainda em andamento (nem ganhos, nem perdidos, nem no estágio 'Não Fechou')." />
                 </span>
@@ -234,7 +234,7 @@ export default async function CrmClientPage({
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative group">
               <div className="absolute inset-0 rounded-2xl bg-amber-500/5 transition-colors group-hover:bg-amber-500/10" />
               <h3 className="text-amber-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Não Fechou
                   <InfoTooltip text="Negócios no estágio 'Não Fechou' do funil. Não contam como ganho nem como pipeline ativo — ficam à parte por não representarem receita nem oportunidade em andamento." />
                 </span>
@@ -247,7 +247,7 @@ export default async function CrmClientPage({
             <div className="bg-[#18181b]/80 border border-[#27272a] rounded-2xl p-6 relative group">
               <div className="absolute inset-0 rounded-2xl bg-blue-500/5 transition-colors group-hover:bg-blue-500/10" />
               <h3 className="text-blue-400/70 font-medium mb-4 flex items-center justify-between relative z-10">
-                <span className="flex items-center gap-1.5">
+                <span className="inline">
                   Vendas
                   <InfoTooltip text="Clientes únicos com pelo menos um lead ganho — diferente de 'Leads Ganhos', não duplica o mesmo cliente que teve mais de um negócio fechado." />
                 </span>
