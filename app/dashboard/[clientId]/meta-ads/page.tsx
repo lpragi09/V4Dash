@@ -11,15 +11,18 @@ import {
   Radar,
   Repeat,
   Percent,
-  Video
+  Video,
+  MapPin
 } from 'lucide-react';
 import Link from 'next/link';
 import TrendChart from '@/components/TrendChart';
 import InfoTooltip from '@/components/InfoTooltip';
 import ComparisonBadge from '@/components/ComparisonBadge';
 import DataTable from '@/components/DataTable';
+import BrazilMap from '@/components/BrazilMap';
 import { getValidAgencyMetaToken } from '@/lib/meta-agency';
 import { resolveDateRange, previousDateRange, datesInRange } from '@/lib/date-range';
+import { findBrazilStateByName } from '@/lib/brazil-states';
 import DateRangeFilter from '@/components/DateRangeFilter';
 
 export const dynamic = 'force-dynamic';
@@ -66,6 +69,13 @@ interface MetaActionRow {
 interface MetaDemographicRow {
   faixaEtaria: string;
   genero: string;
+  gastos: number;
+  leads: number;
+}
+
+interface MetaRegionRow {
+  regiao: string;
+  sigla: string | null;
   gastos: number;
   leads: number;
 }
@@ -239,6 +249,37 @@ async function fetchMetaPlatforms(
     .sort((a, b) => b.gastos - a.gastos);
 }
 
+async function fetchMetaRegions(
+  accountId: string,
+  accessToken: string,
+  range: { since: string; until: string }
+): Promise<MetaRegionRow[]> {
+  const timeRange = encodeURIComponent(JSON.stringify(range));
+  const url = `https://graph.facebook.com/v19.0/${accountId}/insights?access_token=${accessToken}&time_range=${timeRange}&breakdowns=region&fields=spend,actions&limit=200`;
+  const json = await fetchMetaJson(url);
+  if (json.error) throw new Error(json.error.message);
+
+  const rows = (json.data || []) as { region?: string; spend?: string; actions?: MetaActionValue[] }[];
+  const bySigla = new Map<string, MetaRegionRow>();
+
+  for (const row of rows) {
+    if (!row.region) continue;
+    const gastos = parseFloat(row.spend || '0');
+    const leads = findActionValue(row.actions, 'lead');
+    const match = findBrazilStateByName(row.region);
+    const key = match?.sigla || row.region;
+    const existing = bySigla.get(key);
+    if (existing) {
+      existing.gastos += gastos;
+      existing.leads += leads;
+    } else {
+      bySigla.set(key, { regiao: match?.name || row.region, sigla: match?.sigla || null, gastos, leads });
+    }
+  }
+
+  return Array.from(bySigla.values()).sort((a, b) => b.gastos - a.gastos);
+}
+
 /** Preenche com 0 os dias sem retorno da API, pra série sempre ir até hoje. */
 function alignSeries(dates: string[], rows: { date: string; value: number }[]): { date: string; value: number }[] {
   const map = new Map(rows.map((r) => [r.date, r.value]));
@@ -322,6 +363,7 @@ export default async function MetaAdsClientPage({
   let actionBreakdown: MetaActionRow[] = [];
   let demographics: MetaDemographicRow[] = [];
   let platforms: MetaPlatformRow[] = [];
+  let regions: MetaRegionRow[] = [];
   let videoPlays = 0;
   let videoAvgWatchSec = 0;
   let valorConversao = 0;
@@ -379,11 +421,12 @@ export default async function MetaAdsClientPage({
       // Detalhamentos extras (campanha, tipo de ação, público, plataforma, vídeo/ROAS)
       // são independentes do card principal — se um falhar, os outros continuam
       // aparecendo normalmente, só essa seção específica some.
-      const [campaignsSettled, actionsSettled, demoSettled, platformsSettled, videoRoasSettled] = await Promise.allSettled([
+      const [campaignsSettled, actionsSettled, demoSettled, platformsSettled, regionsSettled, videoRoasSettled] = await Promise.allSettled([
         fetchMetaCampaigns(normalizedAccountId, accessToken, current),
         fetchMetaActionBreakdown(normalizedAccountId, accessToken, current),
         fetchMetaDemographics(normalizedAccountId, accessToken, current),
         fetchMetaPlatforms(normalizedAccountId, accessToken, current),
+        fetchMetaRegions(normalizedAccountId, accessToken, current),
         fetchMetaVideoAndRoas(normalizedAccountId, accessToken, current),
       ]);
 
@@ -398,6 +441,9 @@ export default async function MetaAdsClientPage({
 
       if (platformsSettled.status === 'fulfilled') platforms = platformsSettled.value;
       else console.error('Error fetching Meta platforms:', platformsSettled.reason);
+
+      if (regionsSettled.status === 'fulfilled') regions = regionsSettled.value;
+      else console.error('Error fetching Meta regions:', regionsSettled.reason);
 
       if (videoRoasSettled.status === 'fulfilled') {
         videoPlays = videoRoasSettled.value.videoPlays;
@@ -710,6 +756,32 @@ export default async function MetaAdsClientPage({
               </div>
             )}
           </div>
+
+          {regions.length > 0 && (
+            <div className="bg-[#18181b]/50 border border-[#27272a] rounded-3xl p-8">
+              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-blue-500" />
+                Alcance por Região
+                <InfoTooltip text="Gasto e leads por estado do Brasil, com base em onde as pessoas alcançadas pelos anúncios estão. Estados sem cor não tiveram gasto registrado no período." />
+              </h2>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+                <BrazilMap
+                  data={Object.fromEntries(regions.filter((r) => r.sigla).map((r) => [r.sigla as string, r.gastos]))}
+                  format={formatCurrency}
+                  accentColor="#3b82f6"
+                />
+                <DataTable
+                  getRowKey={(row: MetaRegionRow, i) => `${row.regiao}-${i}`}
+                  rows={regions.slice(0, 15)}
+                  columns={[
+                    { key: 'regiao', label: 'Estado', render: (r) => <span className="text-white">{r.regiao}</span> },
+                    { key: 'gastos', label: 'Gasto', align: 'right', render: (r) => formatCurrency(r.gastos) },
+                    { key: 'leads', label: 'Leads', align: 'right', render: (r) => r.leads },
+                  ]}
+                />
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
