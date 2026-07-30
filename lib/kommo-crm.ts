@@ -43,6 +43,79 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+interface KommoIntegrationRow {
+  id: string;
+  conta_id: string | null;
+  access_token: string | null;
+  refresh_token: string | null;
+  token_expires_at: string | null;
+  configuracoes_extras: { client_id?: string; client_secret?: string } | null;
+}
+
+async function refreshKommoToken(
+  domain: string,
+  clientId: string,
+  clientSecret: string,
+  refreshToken: string
+): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+  const response = await fetch(`https://${domain}/oauth2/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      redirect_uri: process.env.NEXT_PUBLIC_APP_URL,
+    }),
+  });
+  const data = await response.json();
+  if (!response.ok || data.status === 400 || data.title === 'Error') {
+    throw new Error(data.detail || data.hint || 'Falha ao renovar token do Kommo.');
+  }
+  return data;
+}
+
+/**
+ * O Kommo expira o access_token em ~24h — essa função renova via
+ * refresh_token quando necessário e grava o token novo de volta em
+ * integracoes_clientes. Retorna null se a integração não tiver os dados
+ * necessários ou se a renovação falhar (refresh_token também expirado, etc.).
+ */
+export async function getValidKommoToken(
+  supabase: SupabaseClient,
+  integracao: KommoIntegrationRow
+): Promise<string | null> {
+  const domain = integracao.conta_id;
+  const clientId = integracao.configuracoes_extras?.client_id;
+  const clientSecret = integracao.configuracoes_extras?.client_secret;
+
+  if (!domain || !integracao.access_token || !integracao.refresh_token || !clientId || !clientSecret) {
+    return integracao.access_token || null;
+  }
+
+  const expiresAt = integracao.token_expires_at ? new Date(integracao.token_expires_at).getTime() : 0;
+  const isExpiringSoon = expiresAt - Date.now() < 5 * 60 * 1000;
+
+  if (!isExpiringSoon) return integracao.access_token;
+
+  try {
+    const tokens = await refreshKommoToken(domain, clientId, clientSecret, integracao.refresh_token);
+    await supabase
+      .from('integracoes_clientes')
+      .update({
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+      })
+      .eq('id', integracao.id);
+    return tokens.access_token;
+  } catch (err) {
+    console.error('Error refreshing Kommo token:', err);
+    return null;
+  }
+}
+
 async function fetchAllKommoLeads(
   domain: string,
   accessToken: string,

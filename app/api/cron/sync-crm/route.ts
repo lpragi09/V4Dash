@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { syncClientCrmSnapshot } from '@/lib/kommo-crm';
+import { syncClientCrmSnapshot, getValidKommoToken } from '@/lib/kommo-crm';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
 
   const { data: integracoes, error } = await supabase
     .from('integracoes_clientes')
-    .select('cliente_id, conta_id, access_token')
+    .select('id, cliente_id, conta_id, access_token, refresh_token, token_expires_at, configuracoes_extras')
     .eq('plataforma', 'crm');
 
   if (error) {
@@ -31,7 +31,12 @@ export async function GET(request: NextRequest) {
   for (const integracao of integracoes || []) {
     if (!integracao.conta_id || !integracao.access_token) continue;
     try {
-      await syncClientCrmSnapshot(supabase, integracao.cliente_id, integracao.conta_id, integracao.access_token);
+      const accessToken = await getValidKommoToken(supabase, integracao);
+      if (!accessToken) {
+        results.push({ clienteId: integracao.cliente_id, status: 'erro', detalhe: 'Token do Kommo expirado e não foi possível renovar. Reconecte em Configurações Gerais.' });
+        continue;
+      }
+      await syncClientCrmSnapshot(supabase, integracao.cliente_id, integracao.conta_id, accessToken);
       results.push({ clienteId: integracao.cliente_id, status: 'ok' });
     } catch (err) {
       results.push({

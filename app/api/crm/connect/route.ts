@@ -58,6 +58,9 @@ export async function POST(request: Request) {
 
     const accessToken = tokenData.access_token;
     const refreshToken = tokenData.refresh_token;
+    const tokenExpiresAt = tokenData.expires_in
+      ? new Date(Date.now() + tokenData.expires_in * 1000).toISOString()
+      : null;
 
     const supabase = await createClient();
 
@@ -78,9 +81,10 @@ export async function POST(request: Request) {
     if (existingInt) {
       await supabase
         .from('integracoes_clientes')
-        .update({ 
+        .update({
           access_token: accessToken,
           refresh_token: refreshToken,
+          token_expires_at: tokenExpiresAt,
           conta_id: fullDomain,
           configuracoes_extras: configExtras
         })
@@ -88,12 +92,13 @@ export async function POST(request: Request) {
     } else {
       await supabase
         .from('integracoes_clientes')
-        .insert([{ 
-          cliente_id: clientId, 
-          plataforma: 'crm', 
+        .insert([{
+          cliente_id: clientId,
+          plataforma: 'crm',
           conta_id: fullDomain,
           access_token: accessToken,
           refresh_token: refreshToken,
+          token_expires_at: tokenExpiresAt,
           configuracoes_extras: configExtras
         }]);
     }
