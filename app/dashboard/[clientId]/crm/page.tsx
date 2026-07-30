@@ -23,11 +23,13 @@ import {
   aggregateBreakdowns,
   buildDailySeries,
   filterLeadsByDate,
+  filterLeadsByPipeline,
   type KommoLeadSnapshot,
   type NamedRef,
 } from '@/lib/kommo-crm';
 import { resolveDateRange, datesInRange, rangeToUnix } from '@/lib/date-range';
 import DateRangeFilter from '@/components/DateRangeFilter';
+import PipelineFilter from '@/components/PipelineFilter';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,11 +48,12 @@ export default async function CrmClientPage({
   searchParams,
 }: {
   params: Promise<{ clientId: string }>;
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; pipeline?: string }>;
 }) {
   const { clientId } = await params;
   const resolvedSearchParams = await searchParams;
   const hasCustomFilter = !!resolvedSearchParams.from && !!resolvedSearchParams.to;
+  const pipelineId = resolvedSearchParams.pipeline ? Number(resolvedSearchParams.pipeline) : undefined;
   const supabase = await createClient();
 
   const { data: client, error: clientError } = await supabase
@@ -81,17 +84,19 @@ export default async function CrmClientPage({
   let lossReasonBreakdown: ReturnType<typeof aggregateBreakdowns>['lossReasonBreakdown'] = [];
   let responsibleBreakdown: ReturnType<typeof aggregateBreakdowns>['responsibleBreakdown'] = [];
   let tagBreakdown: ReturnType<typeof aggregateBreakdowns>['tagBreakdown'] = [];
+  let pipelines: NamedRef[] = [];
 
   if (!crmInt?.conta_id || !crmInt?.access_token) {
     fetchError = 'Conta de CRM não vinculada a este cliente. Configure em Configurações Gerais.';
   } else if (!snapshot) {
     fetchError = 'Ainda não há dados sincronizados desse CRM. A primeira sincronização roda logo após conectar — se acabou de conectar, aguarde alguns instantes e atualize a página.';
   } else {
-    const leads = (snapshot.leads || []) as KommoLeadSnapshot[];
-    const recentLeads = (snapshot.recent_leads || []) as KommoLeadSnapshot[];
+    pipelines = (snapshot.pipelines || []) as NamedRef[];
     const naoFechouIds = (snapshot.nao_fechou_ids || []) as number[];
     const lossReasons = (snapshot.loss_reasons || []) as NamedRef[];
     const users = (snapshot.users || []) as NamedRef[];
+    const leads = filterLeadsByPipeline((snapshot.leads || []) as KommoLeadSnapshot[], pipelineId);
+    const recentLeads = filterLeadsByPipeline((snapshot.recent_leads || []) as KommoLeadSnapshot[], pipelineId);
 
     let leadsForBreakdown = leads;
 
@@ -136,12 +141,17 @@ export default async function CrmClientPage({
             <h1 className="text-3xl font-serif font-bold text-white mb-1">Integração CRM</h1>
             <p className="text-zinc-400">
               Funil de Vendas de {client.nome}
+              {pipelineId && pipelines.find((p) => p.id === pipelineId)
+                ? ` — ${pipelines.find((p) => p.id === pipelineId)!.name}`
+                : ''}
               {hasCustomFilter ? ' — período selecionado' : ' — histórico completo'}
             </p>
           </div>
         </div>
         <DateRangeFilter />
       </div>
+
+      {pipelines.length > 1 && <PipelineFilter pipelines={pipelines} />}
 
       {fetchError && (
         <div className="bg-red-950/50 border border-red-900/50 rounded-2xl p-6 flex flex-col items-start gap-4">

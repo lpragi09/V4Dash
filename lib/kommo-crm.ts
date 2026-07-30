@@ -13,6 +13,7 @@ const STATUS_PERDIDO = 143;
 
 export interface KommoLeadSnapshot {
   status_id: number;
+  pipeline_id?: number;
   price?: number;
   created_at?: number;
   closed_at?: number;
@@ -86,6 +87,7 @@ async function fetchAllKommoLeads(
           const json = await res.json();
           const leads = (json._embedded?.leads || []) as Array<{
             status_id: number;
+            pipeline_id?: number;
             price?: number;
             created_at?: number;
             closed_at?: number;
@@ -102,6 +104,7 @@ async function fetchAllKommoLeads(
             const tags = (lead._embedded?.tags || []).map((t) => t.name).filter(Boolean);
             return {
               status_id: lead.status_id,
+              pipeline_id: lead.pipeline_id,
               price: lead.price,
               created_at: lead.created_at,
               closed_at: lead.closed_at,
@@ -129,32 +132,43 @@ async function fetchAllKommoLeads(
 }
 
 /**
- * "Não Fechou" é um estágio customizado por conta/funil (não o status global
- * de perdido) — identificamos pelo nome do estágio em vez de um ID fixo.
+ * Busca os funis da conta e, junto, os status_id do(s) estágio(s) "Não Fechou"
+ * (customizado por conta/funil, não o status global de perdido — identificamos
+ * pelo nome do estágio em vez de um ID fixo).
  */
-async function fetchNaoFechouStatusIds(domain: string, accessToken: string): Promise<number[]> {
+async function fetchPipelinesData(
+  domain: string,
+  accessToken: string
+): Promise<{ pipelines: NamedRef[]; naoFechouIds: number[] }> {
   try {
     const res = await fetch(`https://${domain}/api/v4/leads/pipelines`, {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: 'no-store',
     });
-    if (!res.ok) return [];
+    if (!res.ok) return { pipelines: [], naoFechouIds: [] };
     const json = await res.json();
-    const pipelines = json._embedded?.pipelines || [];
+    const rawPipelines = (json._embedded?.pipelines || []) as Array<{
+      id: number;
+      name: string;
+      _embedded?: { statuses?: Array<{ id: number; name: string }> };
+    }>;
     const normalize = (s: string) =>
       s.toLowerCase().trim().replace(/ã/g, 'a').replace(/á/g, 'a').replace(/â/g, 'a').replace(/ç/g, 'c');
-    const ids = new Set<number>();
-    for (const pipeline of pipelines) {
+    const naoFechouIds = new Set<number>();
+    for (const pipeline of rawPipelines) {
       const statuses = pipeline._embedded?.statuses || [];
       for (const status of statuses) {
         if (normalize(status.name || '') === 'nao fechou') {
-          ids.add(status.id);
+          naoFechouIds.add(status.id);
         }
       }
     }
-    return Array.from(ids);
+    return {
+      pipelines: rawPipelines.map((p) => ({ id: p.id, name: p.name })),
+      naoFechouIds: Array.from(naoFechouIds),
+    };
   } catch {
-    return [];
+    return { pipelines: [], naoFechouIds: [] };
   }
 }
 
@@ -205,8 +219,8 @@ export async function syncClientCrmSnapshot(
   cutoffDate.setDate(cutoffDate.getDate() - 31);
   const cutoffUnix = Math.floor(cutoffDate.getTime() / 1000);
 
-  const [naoFechouIds, leads, recentLeads, lossReasons, users] = await Promise.all([
-    fetchNaoFechouStatusIds(domain, accessToken),
+  const [pipelinesData, leads, recentLeads, lossReasons, users] = await Promise.all([
+    fetchPipelinesData(domain, accessToken),
     fetchAllKommoLeads(domain, accessToken),
     fetchAllKommoLeads(domain, accessToken, cutoffUnix),
     fetchLossReasons(domain, accessToken),
@@ -218,7 +232,8 @@ export async function syncClientCrmSnapshot(
       cliente_id: clienteId,
       leads,
       recent_leads: recentLeads,
-      nao_fechou_ids: naoFechouIds,
+      nao_fechou_ids: pipelinesData.naoFechouIds,
+      pipelines: pipelinesData.pipelines,
       loss_reasons: lossReasons,
       users,
       atualizado_em: new Date().toISOString(),
@@ -258,6 +273,11 @@ export function aggregateCrmLeads(
   }
 
   return { oportunidades, ganhas, perdidas, naoFechou, vendas: clientesGanhos.size, valorGanho, valorPipeline, valorNaoFechou };
+}
+
+export function filterLeadsByPipeline(leads: KommoLeadSnapshot[], pipelineId?: number): KommoLeadSnapshot[] {
+  if (!pipelineId) return leads;
+  return leads.filter((lead) => lead.pipeline_id === pipelineId);
 }
 
 export function filterLeadsByDate(
